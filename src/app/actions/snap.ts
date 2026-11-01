@@ -17,9 +17,10 @@ import {
   rejectSpine,
   validateSnapUpload,
 } from "@/domain/snap";
+import { assertCanSnap, snapLimitFromEnv } from "@/domain/usage";
 import { run } from "@/server/action";
 import { requireUser } from "@/server/auth";
-import { catalogueSource, readUpload, saveUpload, spineReader } from "@/server/services";
+import { catalogueSource, readUpload, saveUpload, snapsAreMetered, spineReader } from "@/server/services";
 import { prepareImage } from "@/sources/spine-reader";
 
 export async function createSnapAction(_: unknown, form: FormData) {
@@ -28,6 +29,7 @@ export async function createSnapAction(_: unknown, form: FormData) {
     const file = form.get("photo");
     if (!(file instanceof File)) throw invalid("Choose a photo of your shelf");
     validateSnapUpload(file);
+    if (snapsAreMetered) await assertCanSnap(db, user.id, snapLimitFromEnv());
     const locationId = (form.get("locationId") as string) || null;
     // Normalise once on upload: fixes rotation and makes HEIC viewable in every browser.
     const { data } = await prepareImage(new Uint8Array(await file.arrayBuffer())).catch(() => {
@@ -46,6 +48,7 @@ export async function retrySnapAction(sessionId: string) {
   const user = await requireUser();
   return run(async () => {
     const session = await getOwnedSession(db, user.id, sessionId);
+    if (snapsAreMetered) await assertCanSnap(db, user.id, snapLimitFromEnv());
     await processSnap(db, spineReader, catalogueSource, user.id, sessionId, await readUpload(session.imagePath));
     revalidatePath(`/snap/${sessionId}`);
   });

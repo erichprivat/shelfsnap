@@ -308,6 +308,27 @@ export const importRecords = sqliteTable(
   (t) => [primaryKey({ columns: [t.userId, t.source, t.externalId] })],
 );
 
+// ─── Model usage (what each user's snaps cost; drives the monthly limit) ─────
+
+export const modelUsage = sqliteTable(
+  "model_usage",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    sessionId: text("session_id").references(() => snapSessions.id, { onDelete: "set null" }),
+    purpose: text("purpose", { enum: ["spine_read"] }).notNull(),
+    model: text("model").notNull(),
+    inputTokens: integer("input_tokens").notNull(),
+    outputTokens: integer("output_tokens").notNull(),
+    // Millionths of a US dollar, so sums stay exact.
+    costMicros: integer("cost_micros").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("model_usage_user_time_idx").on(t.userId, t.createdAt)],
+);
+
 // ─── Relations ───────────────────────────────────────────────────────────────
 
 export const worksRelations = relations(works, ({ many }) => ({

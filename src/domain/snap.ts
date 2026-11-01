@@ -6,6 +6,7 @@ import { SpineReaderError } from "@/sources/spine-reader";
 import { createManualBook, searchLocal, upsertBook, type BookRecord, type CatalogueSource } from "./catalogue";
 import { conflict, invalid, notFound } from "./errors";
 import { getOwnedLocation } from "./locations";
+import { recordUsage } from "./usage";
 import { positionBetween } from "./ordering";
 import { mainTitle, normalizeText, tokenCoverage, tokens, workMatchKey } from "./text";
 
@@ -206,7 +207,9 @@ export async function processSnap(
 
   let detected: DetectedSpine[];
   try {
-    detected = await reader.read(image);
+    const result = await reader.read(image);
+    detected = result.spines;
+    if (result.usage) await recordUsage(db, userId, sessionId, result.usage);
   } catch (e) {
     const error = e instanceof SpineReaderError ? e.message : "Something went wrong reading the photo. Try again.";
     await db.update(snapSessions).set({ status: "failed", error }).where(eq(snapSessions.id, sessionId));

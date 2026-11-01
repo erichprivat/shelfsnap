@@ -32,6 +32,19 @@ To fill an account with a believable collection for design work:
 bun run src/db/seed.ts you@example.com
 ```
 
+## What snaps cost
+
+Every model read is logged with its tokens and cost (`model_usage`). Each user gets `SNAP_MONTHLY_LIMIT` free
+snaps a month (default 10); search and barcode adds are always free. See the month's spend with:
+
+```bash
+bun run usage            # this month
+bun run usage 2026-11    # a given month
+```
+
+Measured on a 14-book shelf: Opus 5.5 $0.044 (14/14 matched), Sonnet 5.5 $0.022 (13/14 + 1 to check),
+Haiku 5.5 $0.003 (13/14 + 2 to check, slower). Set a monthly spend limit in the Anthropic Console as a backstop.
+
 ## Checks
 
 ```bash

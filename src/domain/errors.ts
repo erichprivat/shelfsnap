@@ -4,7 +4,8 @@ export type DomainErrorCode =
   | "conflict"
   | "forbidden"
   | "unsupported_file"
-  | "upstream_unavailable";
+  | "upstream_unavailable"
+  | "limit_reached";
 
 export class DomainError extends Error {
   constructor(

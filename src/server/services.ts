@@ -5,6 +5,8 @@ import { defaultSpineReader } from "@/sources/spine-reader";
 
 export const catalogueSource = new OpenLibrarySource();
 export const spineReader = defaultSpineReader();
+/** Only real model reads cost money, so only they count against the monthly snap limit. */
+export const snapsAreMetered = spineReader.name === "claude";
 
 const UPLOAD_ROOT = path.resolve(process.env.UPLOAD_DIR ?? "data/uploads");
 

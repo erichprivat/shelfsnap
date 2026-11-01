@@ -25,7 +25,7 @@ const reader = (spines: DetectedSpine[] | Error): SpineReader => ({
   name: "fake",
   read: async () => {
     if (spines instanceof Error) throw spines;
-    return spines;
+    return { spines, usage: null };
   },
 });
 const catalogue = (records: BookRecord[] = [], opts: { down?: boolean; fieldsOnly?: BookRecord[] } = {}): CatalogueSource => ({

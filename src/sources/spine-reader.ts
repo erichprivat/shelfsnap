@@ -7,10 +7,18 @@ import type { BoundingBox } from "@/db/schema";
 
 export type DetectedSpine = { text: string; title: string | null; author: string | null; box: BoundingBox | null };
 
+export type ModelUsage = { model: string; inputTokens: number; outputTokens: number };
+
+/** `usage` is null for readers that don't call a model (demo, fixture). */
+export type ReadResult = { spines: DetectedSpine[]; usage: ModelUsage | null };
+
 export interface SpineReader {
   readonly name: string;
-  read(image: Uint8Array): Promise<DetectedSpine[]>;
+  read(image: Uint8Array): Promise<ReadResult>;
 }
+
+export type SpineModel = "claude-opus-5-5" | "claude-sonnet-5-5" | "claude-haiku-5-5";
+export const SPINE_MODELS: readonly SpineModel[] = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
 
 export class SpineReaderError extends Error {}
 
@@ -64,17 +72,21 @@ export async function prepareImage(input: Uint8Array) {
 
 export class ClaudeSpineReader implements SpineReader {
   readonly name = "claude";
-  constructor(private readonly client = new Anthropic()) {}
+  constructor(
+    private readonly model: SpineModel = "claude-opus-5-5",
+    private readonly client = new Anthropic(),
+  ) {}
 
-  async read(image: Uint8Array): Promise<DetectedSpine[]> {
+  async read(image: Uint8Array): Promise<ReadResult> {
     const prepared = await prepareImage(image);
+    // Haiku has no server-side refusal fallback; the others route a declined request to another model.
+    const fallback = this.model === "claude-haiku-5-5" ? {} : { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const };
     let response;
     try {
       response = await this.client.beta.messages.parse({
-        model: "claude-opus-5-5",
+        model: this.model,
         max_tokens: 16000,
-        betas: ["server-side-fallback-2026-07-01"],
-        fallbacks: "default",
+        ...fallback,
         output_config: { effort: "medium", format: betaZodOutputFormat(SpineSchema) },
         messages: [
           {
@@ -97,7 +109,12 @@ export class ClaudeSpineReader implements SpineReader {
     if (!parsed) throw new SpineReaderError("The spine reader returned something unexpected. Try again.");
 
     const clamp = (n: number) => Math.min(1, Math.max(0, n));
-    return parsed.spines.map((s) => ({
+    const usage: ModelUsage = {
+      model: response.model,
+      inputTokens: response.usage.input_tokens + (response.usage.cache_read_input_tokens ?? 0) + (response.usage.cache_creation_input_tokens ?? 0),
+      outputTokens: response.usage.output_tokens,
+    };
+    const spines = parsed.spines.map((s) => ({
       text: s.text.trim(),
       title: s.title?.trim() || null,
       author: s.author?.trim() || null,
@@ -111,13 +128,14 @@ export class ClaudeSpineReader implements SpineReader {
             }
           : null,
     }));
+    return { spines, usage };
   }
 }
 
 /** Used when no API key is configured: returns a fixed, clearly fake shelf so the flow can be exercised end to end. */
 export class DemoSpineReader implements SpineReader {
   readonly name = "demo";
-  async read(): Promise<DetectedSpine[]> {
+  async read(): Promise<ReadResult> {
     const books: [string, string | null, string | null][] = [
       ["THE LEFT HAND OF DARKNESS URSULA K. LE GUIN ACE", "The Left Hand of Darkness", "Ursula K. Le Guin"],
       ["Piranesi Susanna Clarke BLOOMSBURY", "Piranesi", "Susanna Clarke"],
@@ -128,7 +146,8 @@ export class DemoSpineReader implements SpineReader {
       ["~ ~ ~", null, null],
     ];
     const w = 1 / books.length;
-    return books.map(([text, title, author], i) => ({ text, title, author, box: { x: i * w + w * 0.1, y: 0.08, w: w * 0.8, h: 0.84 } }));
+    const spines = books.map(([text, title, author], i) => ({ text, title, author, box: { x: i * w + w * 0.1, y: 0.08, w: w * 0.8, h: 0.84 } }));
+    return { spines, usage: null };
   }
 }
 
@@ -136,13 +155,15 @@ export class DemoSpineReader implements SpineReader {
 export class FixtureSpineReader implements SpineReader {
   readonly name = "fixture";
   constructor(private readonly path: string) {}
-  async read(): Promise<DetectedSpine[]> {
-    return JSON.parse(await readFile(this.path, "utf8")) as DetectedSpine[];
+  async read(): Promise<ReadResult> {
+    return { spines: JSON.parse(await readFile(this.path, "utf8")) as DetectedSpine[], usage: null };
   }
 }
 
 export function defaultSpineReader(): SpineReader {
   const fixture = process.env.SPINE_READER_FIXTURE;
   if (fixture && process.env.NODE_ENV !== "production") return new FixtureSpineReader(fixture);
-  return process.env.ANTHROPIC_API_KEY ? new ClaudeSpineReader() : new DemoSpineReader();
+  if (!process.env.ANTHROPIC_API_KEY) return new DemoSpineReader();
+  const model = SPINE_MODELS.find((m) => m === process.env.SPINE_READER_MODEL) ?? "claude-opus-5-5";
+  return new ClaudeSpineReader(model);
 }

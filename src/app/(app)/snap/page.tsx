@@ -4,11 +4,12 @@ import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { snapSessions } from "@/db/schema";
 import { shelvesFor } from "@/domain/library";
-import { PageHead } from "@/components/ui";
-import { formatDate } from "@/lib/labels";
+import { LinkButton, PageHead } from "@/components/ui";
+import { formatDate, plural } from "@/lib/labels";
 import { placeOrder, placePaths } from "@/lib/places";
+import { snapAllowance, snapLimitFromEnv } from "@/domain/usage";
 import { requireUser } from "@/server/auth";
-import { spineReader } from "@/server/services";
+import { snapsAreMetered, spineReader } from "@/server/services";
 import { SnapForm } from "./snap-form";
 
 export const metadata: Metadata = { title: "Snap a shelf" };
@@ -20,6 +21,8 @@ export default async function SnapPage({ searchParams }: PageProps<"/snap">) {
     shelvesFor(db, user.id),
     db.query.snapSessions.findMany({ where: eq(snapSessions.userId, user.id), orderBy: [desc(snapSessions.createdAt)], limit: 5, with: { spines: { columns: { id: true } } } }),
   ]);
+  const allowance = snapsAreMetered ? await snapAllowance(db, user.id, snapLimitFromEnv()) : null;
+  const outOfSnaps = allowance?.remaining === 0;
   const paths = placePaths(places);
   const options = placeOrder(places).map((p) => ({ id: p.id, label: (paths.get(p.id) ?? []).join(" / ") }));
   return (
@@ -37,7 +40,16 @@ export default async function SnapPage({ searchParams }: PageProps<"/snap">) {
           Demo mode: no <code className="font-mono text-[13px]">ANTHROPIC_API_KEY</code> is set, so any photo returns the same sample shelf.
         </p>
       )}
-      <SnapForm places={options} defaultPlace={typeof place === "string" ? place : ""} />
+      {outOfSnaps ? (
+        <OutOfSnaps resetsAt={allowance!.resetsAt} limit={allowance!.limit!} />
+      ) : (
+        <SnapForm places={options} defaultPlace={typeof place === "string" ? place : ""} />
+      )}
+      {allowance && allowance.remaining !== null && !outOfSnaps && (
+        <p className="-mt-4 text-sm text-ink-3">
+          <span className="num text-ink-2">{allowance.remaining}</span> of {plural(allowance.limit!, "free snap")} left this month · resets {formatReset(allowance.resetsAt)}
+        </p>
+      )}
       {recent.length > 0 && (
         <section className="flex flex-col gap-3">
           <h2 className="label">Recent snaps</h2>
@@ -65,4 +77,18 @@ export default async function SnapPage({ searchParams }: PageProps<"/snap">) {
 function snapSummary(status: string, spines: number) {
   if (status === "failed") return "Couldn't read";
   return `${spines} spines · ${status === "committed" ? "added" : "to review"}`;
+}
+
+const formatReset = (d: Date) => d.toLocaleDateString("en-GB", { day: "numeric", month: "long", timeZone: "UTC" });
+
+function OutOfSnaps({ resetsAt, limit }: { resetsAt: Date; limit: number }) {
+  return (
+    <section className="flex flex-col items-start gap-4 border-l-2 border-ochre py-2 pl-6">
+      <h2 className="font-serif text-2xl">You&apos;ve used this month&apos;s {plural(limit, "free snap")}</h2>
+      <p className="max-w-lg text-[15px] text-ink-2">
+        Snapping resets on {formatReset(resetsAt)}. Until then you can still add any book by searching or scanning its barcode — those are always free.
+      </p>
+      <LinkButton href="/add">Find or scan a book</LinkButton>
+    </section>
+  );
 }
