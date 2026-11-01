@@ -14,7 +14,7 @@ export interface SpineReader {
 
 export class SpineReaderError extends Error {}
 
-// High-resolution vision tier: coordinates map 1:1 to pixels up to this edge length.
+// High-resolution vision tier: larger images gain nothing and cost more tokens.
 const MAX_EDGE = 2576;
 
 const SpineSchema = z.object({
@@ -23,16 +23,17 @@ const SpineSchema = z.object({
       text: z.string().describe("Every word legible on the spine, in reading order"),
       title: z.string().nullable().describe("Best guess at the book title, or null if unreadable"),
       author: z.string().nullable().describe("Best guess at the author, or null"),
-      x: z.number().describe("Left edge of the spine in pixels"),
-      y: z.number().describe("Top edge in pixels"),
-      width: z.number(),
-      height: z.number(),
+      // A fixed 0–1000 scale stays correct however the image is resized on the way to the model.
+      x: z.number().describe("Left edge of the spine, 0–1000 across the image width"),
+      y: z.number().describe("Top edge, 0–1000 down the image height"),
+      width: z.number().describe("Width, 0–1000 of the image width"),
+      height: z.number().describe("Height, 0–1000 of the image height"),
     }),
   ),
 });
 
 const PROMPT = `This is a photo of a bookshelf. List every book spine you can see, from left to right (top shelf first if there are several).
-For each spine give the legible text, your best reading of title and author, and its bounding box in pixels of this image.
+For each spine give the legible text, your best reading of title and author, and its bounding box on a 0–1000 scale of the image's width and height.
 Include spines you can only partly read — use null for title/author when you genuinely can't tell. Skip objects that aren't books.`;
 
 const isHeif = (b: Uint8Array) => {
@@ -103,10 +104,10 @@ export class ClaudeSpineReader implements SpineReader {
       box:
         s.width > 0 && s.height > 0
           ? {
-              x: clamp(s.x / prepared.width),
-              y: clamp(s.y / prepared.height),
-              w: clamp(s.width / prepared.width),
-              h: clamp(s.height / prepared.height),
+              x: clamp(s.x / 1000),
+              y: clamp(s.y / 1000),
+              w: clamp(s.width / 1000),
+              h: clamp(s.height / 1000),
             }
           : null,
     }));
