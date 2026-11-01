@@ -19,7 +19,7 @@ export async function sendMagicLinkEmail(email: string, url: string) {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      from: process.env.EMAIL_FROM ?? "Readmoth <hello@readmoth.com>",
+      from: process.env.EMAIL_FROM ?? "Readmoth <hello@readmoth.app>",
       to: email,
       subject: "Your Readmoth sign-in link",
       text: `Open this link to sign in to Readmoth. It works once and expires in 15 minutes.\n\n${url}\n\nIf you didn't ask for this, you can ignore this email.`,

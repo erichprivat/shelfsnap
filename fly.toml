@@ -5,8 +5,7 @@ primary_region = "arn"
 
 [env]
   BETTER_AUTH_URL = "https://readmoth.app"
-  # Resend's test sender delivers only to the Resend account's own address; switch once a domain is verified.
-  EMAIL_FROM = "Readmoth <onboarding@resend.dev>"
+  EMAIL_FROM = "Readmoth <hello@readmoth.app>"
   DATABASE_URL = "file:/data/readmoth.db"
   UPLOAD_DIR = "/data/uploads"
   SPINE_READER_MODEL = "claude-opus-5-5"
