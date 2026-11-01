@@ -1,0 +1,162 @@
+@import "tailwindcss";
+
+/* Shelfsnap tokens — a private library: warm paper, iron-gall ink, one bookbinder's red. */
+:root {
+  --paper: #f3eee4;
+  --paper-raised: #faf7f1;
+  --paper-sunk: #ebe4d6;
+  --ink: #1e1c19;
+  --ink-2: #5a544b;
+  --ink-3: #8b8377;
+  --rule: rgb(30 28 25 / 0.13);
+  --rule-strong: rgb(30 28 25 / 0.32);
+  --accent: #8a2e1f;
+  --accent-ink: #fbf5ee;
+  --accent-soft: #efe0d8;
+  --moss: #46593a;
+  --moss-soft: #e2e6d6;
+  --ochre: #9a6516;
+  --ochre-soft: #f1e5cc;
+  --focus: #8a2e1f;
+  --shelf: #3b2f25;
+  --shelf-shadow: rgb(30 28 25 / 0.16);
+  --spine-edge: rgb(255 255 255 / 0);
+  --shadow-book: 0 1px 0 rgb(30 28 25 / 0.08), 0 8px 18px -10px rgb(30 28 25 / 0.45);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #15130f;
+    --paper-raised: #1d1a15;
+    --paper-sunk: #100e0b;
+    --ink: #ece5d8;
+    --ink-2: #b2a998;
+    --ink-3: #7e7669;
+    --rule: rgb(236 229 216 / 0.12);
+    --rule-strong: rgb(236 229 216 / 0.3);
+    --accent: #d2725b;
+    --accent-ink: #1a0f0b;
+    --accent-soft: #3a211a;
+    --moss: #9fb487;
+    --moss-soft: #232a1c;
+    --ochre: #d9a557;
+    --ochre-soft: #2e2414;
+    --focus: #d2725b;
+    --shelf: #5a4636;
+    --shelf-shadow: rgb(0 0 0 / 0.5);
+    --spine-edge: rgb(255 255 255 / 0.09);
+    --shadow-book: 0 1px 0 rgb(0 0 0 / 0.3), 0 10px 20px -10px rgb(0 0 0 / 0.8);
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-raised: var(--paper-raised);
+  --color-paper-sunk: var(--paper-sunk);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-moss: var(--moss);
+  --color-moss-soft: var(--moss-soft);
+  --color-ochre: var(--ochre);
+  --color-ochre-soft: var(--ochre-soft);
+  --font-sans: var(--font-ui);
+  --font-serif: var(--font-display);
+  --font-mono: var(--font-code);
+  --shadow-book: var(--shadow-book);
+  --color-shelf: var(--shelf);
+  --color-shelf-shadow: var(--shelf-shadow);
+}
+
+@layer base {
+html {
+  background: var(--paper);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "ss01", "tnum" 0;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--focus) 12%, transparent);
+}
+}
+
+/* Small-caps catalogue labels. */
+.label {
+  font-size: 0.6875rem;
+  line-height: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* The board books stand on. */
+.shelf-board {
+  height: 7px;
+  border-radius: 1px;
+  background: linear-gradient(180deg, color-mix(in oklab, var(--shelf) 80%, white) 0 1px, var(--shelf) 1px);
+}
+.shelf-board + .shelf-shade {
+  height: 10px;
+  margin-inline: 6px;
+  background: linear-gradient(180deg, var(--shelf-shadow), transparent);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.spine-text {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}
+
+/* Paper grain: barely-there noise so large surfaces don't read as flat UI. */
+.grain {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes scan {
+  from {
+    top: -6rem;
+  }
+  to {
+    top: 100%;
+  }
+}
