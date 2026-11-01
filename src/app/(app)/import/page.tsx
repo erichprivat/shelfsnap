@@ -28,7 +28,7 @@ export default async function ImportPage() {
             <ul className="flex flex-col gap-1.5">
               <li>Books on an “owned” shelf become copies in your library, waiting to be shelved.</li>
               <li>Read, currently reading, to-read, did-not-finish and paused shelves become reading status.</li>
-              <li>Anything you&apos;ve already set in Shelfsnap is never overwritten.</li>
+              <li>Anything you&apos;ve already set in Readmoth is never overwritten.</li>
             </ul>
           </div>
         </aside>

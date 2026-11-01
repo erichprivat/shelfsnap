@@ -1,4 +1,4 @@
-# Shelfsnap — Product Spec v0
+# Readmoth — Product Spec v0
 
 _Status: draft · Owner: Thilo · Last updated: 2026-11-01_
 
@@ -8,7 +8,7 @@ Heavy readers own hundreds of books, and no tool makes that library feel like *t
 StoryGraph and Hardcover are built around reading logs; ownership is an afterthought. The tools that
 do track ownership (LibraryThing, Libib, CLZ Books) look like spreadsheets.
 
-**Shelfsnap: your library, beautifully. Snap your shelf, and it's catalogued.**
+**Readmoth: your library, catalogued in a snap.**
 
 Cataloguing a physical collection becomes near-effortless (photo, barcode, import). Reading status,
 lists and challenges layer on top to keep people coming back. Community comes last, once there is
@@ -183,7 +183,7 @@ since 2020. Verify current pricing and terms before committing to any of these.
 1. Web-first (fast to prototype in Claude Design) or native mobile first (camera, barcode)?
    Leaning toward a mobile-web PWA for the MVP.
 2. Business model: premium vs affiliate as the primary model.
-3. Name check: Shelfsnap domain, trademark and app-store availability.
+3. ~~Name check~~ Done: renamed from Shelfsnap (taken by a live competitor) to Readmoth (2026-11-01).
 4. Stack (to decide with the first technical design).
 
 ## 11. First design pass (Claude Design)

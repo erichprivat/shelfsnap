@@ -1,4 +1,4 @@
-# Fly.io: one small machine in Stockholm, with a volume holding the SQLite database and snap photos.
+# Readmoth on Fly.io (the app keeps its original internal name, shelfsnap): one small machine in Stockholm, with a volume holding the SQLite database and snap photos.
 # Deploy with `fly deploy --ha=false` — SQLite on a volume means exactly one machine.
 app = "shelfsnap"
 primary_region = "arn"
@@ -6,8 +6,8 @@ primary_region = "arn"
 [env]
   BETTER_AUTH_URL = "https://shelfsnap.fly.dev"
   # Resend's test sender delivers only to the Resend account's own address; switch once a domain is verified.
-  EMAIL_FROM = "Shelfsnap <onboarding@resend.dev>"
-  DATABASE_URL = "file:/data/shelfsnap.db"
+  EMAIL_FROM = "Readmoth <onboarding@resend.dev>"
+  DATABASE_URL = "file:/data/readmoth.db"
   UPLOAD_DIR = "/data/uploads"
   SPINE_READER_MODEL = "claude-opus-5-5"
   SNAP_MONTHLY_LIMIT = "10"

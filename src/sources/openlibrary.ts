@@ -92,7 +92,7 @@ function fromDoc(doc: SearchDoc): BookRecord | null {
 export class OpenLibrarySource implements CatalogueSource {
   constructor(
     private readonly fetchImpl: typeof fetch = fetch,
-    private readonly userAgent = process.env.OPEN_LIBRARY_USER_AGENT ?? "Shelfsnap/0.1 (https://github.com/erichprivat/shelfsnap)",
+    private readonly userAgent = process.env.OPEN_LIBRARY_USER_AGENT ?? "Readmoth/0.1 (https://github.com/erichprivat/shelfsnap)",
   ) {}
 
   private async get<T>(path: string): Promise<T | null> {

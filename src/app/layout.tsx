@@ -7,8 +7,8 @@ const ui = Schibsted_Grotesk({ variable: "--font-ui", subsets: ["latin", "latin-
 const code = IBM_Plex_Mono({ variable: "--font-code", subsets: ["latin"], weight: ["400", "500"] });
 
 export const metadata: Metadata = {
-  title: { default: "Shelfsnap", template: "%s · Shelfsnap" },
-  description: "Your library, beautifully. Snap your shelf and it's catalogued.",
+  title: { default: "Readmoth", template: "%s · Readmoth" },
+  description: "For people who own their books. Snap your shelves and Readmoth catalogues them.",
 };
 
 export const viewport: Viewport = {

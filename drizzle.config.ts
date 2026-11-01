@@ -4,5 +4,5 @@ export default defineConfig({
   schema: "./src/db/schema.ts",
   out: "./drizzle",
   dialect: "turso",
-  dbCredentials: { url: process.env.DATABASE_URL ?? "file:./data/shelfsnap.db" },
+  dbCredentials: { url: process.env.DATABASE_URL ?? "file:./data/readmoth.db" },
 });

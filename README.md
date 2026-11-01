@@ -1,6 +1,6 @@
-# Shelfsnap
+# Readmoth
 
-Your library, beautifully. Snap your shelf and it's catalogued.
+For people who own their books. Snap your shelves and Readmoth catalogues them.
 
 The product spec lives in [docs/spec.md](docs/spec.md). This is the v0.1 MVP from §3: sign-in, Goodreads/StoryGraph
 import, shelf snap, barcode/search, rooms and shelves, lending, reading status with history, and lists.
@@ -54,7 +54,7 @@ One machine in Stockholm with a 3 GB volume at `/data` holding the SQLite databa
 fly auth login
 fly launch --no-deploy --copy-config      # first time only; keeps fly.toml, creates the app
 fly volumes create shelfsnap_data --region arn --size 3
-fly secrets set BETTER_AUTH_SECRET="$(openssl rand -hex 32)" ANTHROPIC_API_KEY=… RESEND_API_KEY=… EMAIL_FROM="Shelfsnap <hello@your-domain>"
+fly secrets set BETTER_AUTH_SECRET="$(openssl rand -hex 32)" ANTHROPIC_API_KEY=… RESEND_API_KEY=… EMAIL_FROM="Readmoth <hello@your-domain>"
 fly deploy --ha=false                     # one machine: SQLite on a volume can't be shared
 ```
 
