@@ -5,6 +5,8 @@ primary_region = "arn"
 
 [env]
   BETTER_AUTH_URL = "https://shelfsnap.fly.dev"
+  # Resend's test sender delivers only to the Resend account's own address; switch once a domain is verified.
+  EMAIL_FROM = "Shelfsnap <onboarding@resend.dev>"
   DATABASE_URL = "file:/data/shelfsnap.db"
   UPLOAD_DIR = "/data/uploads"
   SPINE_READER_MODEL = "claude-opus-5-5"
