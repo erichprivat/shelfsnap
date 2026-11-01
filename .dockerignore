@@ -1,0 +1,11 @@
+.git
+.github
+.next
+.next-build
+node_modules
+data
+fixtures
+docs
+*.md
+.env*
+!.env.example

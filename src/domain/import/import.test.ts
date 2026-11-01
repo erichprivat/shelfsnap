@@ -135,7 +135,7 @@ describe("applyImport", () => {
     expect(reads.filter((r) => r.rating !== null)).toEqual([expect.objectContaining({ finishedAt: "2024-03-02", rating: 10 })]);
   });
 
-  it("never overrides what the user already did in Shelfsnap", async () => {
+  it("never overrides what the user already did in Readmoth", async () => {
     const { workId, editionId } = await addBook(db, "Dune", "Frank Herbert", "9780441172719");
     await setStatus(db, me, workId, "reading");
     await addCopy(db, me, { editionId });

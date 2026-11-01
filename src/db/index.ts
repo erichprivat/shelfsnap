@@ -21,7 +21,7 @@ export async function migrateDb(db: Db) {
 
 const globalForDb = globalThis as unknown as { db?: Db };
 
-export const db = globalForDb.db ?? createDb(process.env.DATABASE_URL ?? "file:./data/shelfsnap.db");
+export const db = globalForDb.db ?? createDb(process.env.DATABASE_URL ?? "file:./data/readmoth.db");
 if (process.env.NODE_ENV !== "production") globalForDb.db = db;
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];

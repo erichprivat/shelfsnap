@@ -6,7 +6,7 @@ import { LinkButton } from "@/components/ui";
 import { getSession } from "@/server/auth";
 
 const STEPS = [
-  ["Snap", "Photograph a shelf. Shelfsnap reads every spine it can see, left to right, top shelf first."],
+  ["Snap", "Photograph a shelf. Readmoth reads every spine it can see, left to right, top shelf first."],
   ["Check", "Confident matches are ticked for you. Anything uncertain shows its best guesses — one tap to pick."],
   ["Shelve", "Books land in the room and shelf you chose, in the order they stand. Find any copy later in seconds."],
 ];
@@ -30,7 +30,7 @@ export default async function Home() {
               Your library, catalogued <em className="text-accent">in a&nbsp;snap.</em>
             </h1>
             <p className="max-w-md text-lg leading-relaxed text-ink-2">
-              Photograph your shelves and Shelfsnap builds the catalogue: every book, which room it lives in, who borrowed it, and
+              Photograph your shelves and Readmoth builds the catalogue: every book, which room it lives in, who borrowed it, and
               whether you&apos;ve actually read it.
             </p>
             <div className="flex flex-wrap items-center gap-3">
@@ -57,7 +57,7 @@ export default async function Home() {
           <h2 className="font-serif text-3xl leading-tight text-balance">Owning a book and reading it are two different things.</h2>
           <div className="grid gap-8 text-[15px] leading-relaxed text-ink-2 sm:grid-cols-2">
             <p>
-              Reading apps lump them together, so your shelves turn into a to-do list. Shelfsnap keeps them apart: the copies you
+              Reading apps lump them together, so your shelves turn into a to-do list. Readmoth keeps them apart: the copies you
               own, where each one stands, and a separate, honest record of what you&apos;ve read, abandoned or are halfway
               through.
             </p>
@@ -71,7 +71,7 @@ export default async function Home() {
       </main>
 
       <footer className="mx-auto flex max-w-6xl justify-between border-t border-rule px-4 py-8 text-xs text-ink-3 sm:px-8">
-        <span>Shelfsnap</span>
+        <span>Readmoth</span>
         <span>Catalogue data from Open Library</span>
       </footer>
     </div>
