@@ -1,0 +1,35 @@
+# Fly.io: one small machine in Stockholm, with a volume holding the SQLite database and snap photos.
+# Deploy with `fly deploy --ha=false` — SQLite on a volume means exactly one machine.
+app = "shelfsnap"
+primary_region = "arn"
+
+[env]
+  BETTER_AUTH_URL = "https://shelfsnap.fly.dev"
+  DATABASE_URL = "file:/data/shelfsnap.db"
+  UPLOAD_DIR = "/data/uploads"
+  SPINE_READER_MODEL = "claude-opus-5-5"
+  SNAP_MONTHLY_LIMIT = "10"
+
+[[mounts]]
+  source = "shelfsnap_data"
+  destination = "/data"
+  initial_size = "3gb"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    grace_period = "30s"
+    interval = "30s"
+    method = "GET"
+    path = "/api/health"
+    timeout = "5s"
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1

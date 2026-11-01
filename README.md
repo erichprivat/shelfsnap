@@ -45,6 +45,19 @@ bun run usage 2026-11    # a given month
 Measured on a 14-book shelf: Opus 5.5 $0.044 (14/14 matched), Sonnet 5.5 $0.022 (13/14 + 1 to check),
 Haiku 5.5 $0.003 (13/14 + 2 to check, slower). Set a monthly spend limit in the Anthropic Console as a backstop.
 
+## Deploy (Fly.io)
+
+One machine in Stockholm with a 3 GB volume at `/data` holding the SQLite database and snap photos
+(~$5/month; daily volume snapshots kept 5 days). Config is in `fly.toml`; migrations run on boot.
+
+```bash
+fly auth login
+fly launch --no-deploy --copy-config      # first time only; keeps fly.toml, creates the app
+fly volumes create shelfsnap_data --region arn --size 3
+fly secrets set BETTER_AUTH_SECRET="$(openssl rand -hex 32)" ANTHROPIC_API_KEY=… RESEND_API_KEY=… EMAIL_FROM="Shelfsnap <hello@your-domain>"
+fly deploy --ha=false                     # one machine: SQLite on a volume can't be shared
+```
+
 ## Checks
 
 ```bash
