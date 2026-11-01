@@ -96,6 +96,7 @@ describe("resolveIsbn", () => {
   const source = (impl: Partial<CatalogueSource>): CatalogueSource => ({
     lookupIsbn: async () => null,
     search: async () => [],
+    searchByTitle: async () => [],
     ...impl,
   });
 

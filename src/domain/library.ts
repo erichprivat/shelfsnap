@@ -80,6 +80,8 @@ export async function libraryItems(db: DbLike, userId: string): Promise<LibraryI
 
   for (const { copy, edition, work } of owned) {
     const item = ensure(work);
+    // Show the title of the copy on the shelf ("The Plague"), not the work's original ("La Peste").
+    if (item.copies.length === 0 && edition.title) item.title = edition.title;
     item.coverUrl ??= edition.coverUrl;
     item.pageCount ??= edition.pageCount;
     item.addedAt = Math.min(item.addedAt, copy.createdAt.getTime());

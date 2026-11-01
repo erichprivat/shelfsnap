@@ -3,6 +3,9 @@ import { parseIsbn, type Isbn13 } from "@/domain/isbn";
 
 const BASE = "https://openlibrary.org";
 const TIMEOUT_MS = 8000;
+// The editions.* fields make Open Library return the edition that best matches the query.
+const SEARCH_FIELDS =
+  "key,title,subtitle,author_name,first_publish_year,cover_i,cover_edition_key,subject,isbn,editions,editions.key,editions.title,editions.isbn,editions.cover_i,editions.language";
 
 type SearchDoc = {
   key?: string;
@@ -14,7 +17,10 @@ type SearchDoc = {
   cover_edition_key?: string;
   subject?: string[];
   isbn?: string[];
+  editions?: { docs?: EditionDoc[] };
 };
+
+type EditionDoc = { key?: string; title?: string; isbn?: string[]; cover_i?: number; language?: string[] };
 
 type EditionJson = {
   title?: string;
@@ -43,9 +49,30 @@ const yearOf = (date: string | undefined) => {
   return m ? Number(m[1]) : null;
 };
 
+const firstIsbn = (list: string[] | undefined) => list?.map((i) => parseIsbn(i)).find((i) => i !== null) ?? null;
+
 function fromDoc(doc: SearchDoc): BookRecord | null {
   if (!doc.title) return null;
-  const isbn = doc.isbn?.map((i) => parseIsbn(i)).find((i) => i !== null) ?? null;
+  const match = doc.editions?.docs?.[0];
+  if (match?.key) {
+    const cover = match.cover_i ?? doc.cover_i;
+    return {
+      title: doc.title,
+      subtitle: doc.subtitle ?? null,
+      authors: doc.author_name ?? [],
+      firstPublishYear: doc.first_publish_year ?? null,
+      subjects: (doc.subject ?? []).slice(0, 12),
+      openLibraryKey: doc.key ?? null,
+      edition: {
+        title: match.title ?? doc.title,
+        isbn13: firstIsbn(match.isbn),
+        openLibraryKey: match.key,
+        language: match.language?.[0] ?? null,
+        coverUrl: cover ? coverById(cover) : null,
+      },
+    };
+  }
+  const isbn = firstIsbn(doc.isbn);
   return {
     title: doc.title,
     subtitle: doc.subtitle ?? null,
@@ -78,14 +105,21 @@ export class OpenLibrarySource implements CatalogueSource {
     return (await res.json()) as T;
   }
 
+  private async searchDocs(params: Record<string, string>, limit: number): Promise<BookRecord[]> {
+    const query = new URLSearchParams({ ...params, limit: String(limit), fields: SEARCH_FIELDS });
+    const body = await this.get<{ docs?: SearchDoc[] }>(`/search.json?${query}`);
+    return (body?.docs ?? []).map(fromDoc).filter((r): r is BookRecord => r !== null);
+  }
+
   async search(query: string, limit: number): Promise<BookRecord[]> {
     const q = query.trim();
-    if (!q) return [];
-    const fields = "key,title,subtitle,author_name,first_publish_year,cover_i,cover_edition_key,subject,isbn";
-    const body = await this.get<{ docs?: SearchDoc[] }>(
-      `/search.json?q=${encodeURIComponent(q)}&limit=${limit}&fields=${fields}`,
-    );
-    return (body?.docs ?? []).map(fromDoc).filter((r): r is BookRecord => r !== null);
+    return q ? this.searchDocs({ q }, limit) : [];
+  }
+
+  async searchByTitle(title: string, author: string | null, limit: number): Promise<BookRecord[]> {
+    const t = title.trim();
+    if (!t) return [];
+    return this.searchDocs(author?.trim() ? { title: t, author: author.trim() } : { title: t }, limit);
   }
 
   async lookupIsbn(isbn: Isbn13): Promise<BookRecord | null> {

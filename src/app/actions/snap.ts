@@ -5,6 +5,9 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { invalid } from "@/domain/errors";
 import {
+  addMissedBook,
+  correctSpine,
+  type BookChoice,
   commitSnap,
   confirmAllMatched,
   confirmSpine,
@@ -80,5 +83,21 @@ export async function commitSnapAction(sessionId: string) {
     revalidatePath(`/snap/${sessionId}`);
     revalidatePath("/library");
     return res;
+  });
+}
+
+export async function correctSpineAction(sessionId: string, spineId: string, choice: BookChoice) {
+  const user = await requireUser();
+  return run(async () => {
+    await correctSpine(db, user.id, spineId, choice);
+    revalidatePath(`/snap/${sessionId}`);
+  });
+}
+
+export async function addMissedBookAction(sessionId: string, choice: BookChoice, afterOrdinal: number | null) {
+  const user = await requireUser();
+  return run(async () => {
+    await addMissedBook(db, user.id, sessionId, choice, afterOrdinal);
+    revalidatePath(`/snap/${sessionId}`);
   });
 }

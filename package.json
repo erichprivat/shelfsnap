@@ -17,6 +17,7 @@
     "@libsql/client": "^0.18.0",
     "better-auth": "^1.7.14",
     "drizzle-orm": "^0.45.4",
+    "heic-decode": "^2.1.0",
     "next": "16.4.3",
     "papaparse": "^5.7.0",
     "react": "19.3.0",

@@ -17,6 +17,15 @@ bun run dev
 Sign in with any email. Without `RESEND_API_KEY` the sign-in link appears on the "check your inbox" page.
 Without `ANTHROPIC_API_KEY`, shelf snap runs in a labelled demo mode that returns the same sample shelf for any photo.
 
+To exercise matching and review on a real shelf without an API key, replay a recorded reading:
+
+```bash
+SPINE_READER_FIXTURE=fixtures/img-2859.json bun run dev
+```
+
+`fixtures/img-2859.json` is a 14-book shelf (tilted spines, German/English/Italian titles, a half-hidden book) that
+matches 14/14 against live Open Library.
+
 To fill an account with a believable collection for design work:
 
 ```bash

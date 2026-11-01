@@ -27,6 +27,11 @@ export default async function SnapPage({ searchParams }: PageProps<"/snap">) {
       <PageHead eyebrow="Add books" title="Snap a shelf">
         One shelf per photo works best: straight on, well lit, spines filling the frame.
       </PageHead>
+      {spineReader.name === "fixture" && (
+        <p className="border-l-2 border-ochre bg-ochre-soft px-4 py-3 text-sm text-ink-2">
+          Fixture mode: <code className="font-mono text-[13px]">SPINE_READER_FIXTURE</code> replays a recorded reading for every photo.
+        </p>
+      )}
       {spineReader.name === "demo" && (
         <p className="border-l-2 border-ochre bg-ochre-soft px-4 py-3 text-sm text-ink-2">
           Demo mode: no <code className="font-mono text-[13px]">ANTHROPIC_API_KEY</code> is set, so any photo returns the same sample shelf.

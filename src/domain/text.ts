@@ -20,10 +20,15 @@ export function stripSeries(title: string): string {
   return title.replace(SERIES_SUFFIX, "").trim();
 }
 
+/** The title without series, subtitle or edition note: "Basquiat - 40th Anniversary Edition" → "Basquiat". */
+export function mainTitle(title: string): string {
+  return stripSeries(title).split(/:|\s[-–—]\s/)[0]!.trim();
+}
+
 const LEADING_ARTICLE = /^(the|a|an|der|die|das|le|la|les|el|den|det|en|et) /;
 
 export function workMatchKey(title: string, authors: string[]): string {
-  const t = normalizeText(stripSeries(title).split(":")[0] ?? title).replace(LEADING_ARTICLE, "");
+  const t = normalizeText(mainTitle(title)).replace(LEADING_ARTICLE, "");
   const surname = normalizeText(authors[0] ?? "").split(" ").at(-1) ?? "";
   return `${t}|${surname}`;
 }

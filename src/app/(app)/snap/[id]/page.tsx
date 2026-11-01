@@ -22,7 +22,7 @@ export default async function SnapReviewPage({ params }: PageProps<"/snap/[id]">
   const spines = await db.query.snapSpines.findMany({ where: eq(snapSpines.sessionId, id), orderBy: [asc(snapSpines.ordinal)] });
   const editionIds = [...new Set(spines.flatMap((s) => [...s.candidates.map((c) => c.editionId), ...(s.chosenEditionId ? [s.chosenEditionId] : [])]))];
   const eds = editionIds.length ? await db.query.editions.findMany({ where: inArray(editions.id, editionIds), with: { work: true } }) : [];
-  const byId = new Map(eds.map((e) => [e.id, { editionId: e.id, workId: e.workId, title: e.work.title, authors: e.work.authors, year: e.work.firstPublishYear, coverUrl: e.coverUrl }]));
+  const byId = new Map(eds.map((e) => [e.id, { editionId: e.id, workId: e.workId, title: e.title || e.work.title, authors: e.work.authors, year: e.work.firstPublishYear, coverUrl: e.coverUrl }]));
   const place = session.locationId ? (await locationPath(db, user.id, session.locationId)).map((l) => l.name).join(" / ") : null;
 
   const view: ReviewSpine[] = spines.map((s) => ({

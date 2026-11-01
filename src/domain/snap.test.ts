@@ -1,12 +1,14 @@
 import { asc, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
-import { copies, snapSpines } from "@/db/schema";
+import { copies, snapSessions, snapSpines } from "@/db/schema";
 import { SpineReaderError, type DetectedSpine, type SpineReader } from "@/sources/spine-reader";
 import { addBook, book, makeUser, testDb, type TestDb } from "@/test/db";
-import type { BookRecord, CatalogueSource } from "./catalogue";
+import { createManualBook, type BookRecord, type CatalogueSource } from "./catalogue";
 import { addCopy } from "./copies";
 import { createLocation } from "./locations";
 import {
+  addMissedBook,
+  correctSpine,
   classify,
   commitSnap,
   confirmAllMatched,
@@ -26,12 +28,16 @@ const reader = (spines: DetectedSpine[] | Error): SpineReader => ({
     return spines;
   },
 });
-const catalogue = (records: BookRecord[] = [], opts: { down?: boolean } = {}): CatalogueSource => ({
+const catalogue = (records: BookRecord[] = [], opts: { down?: boolean; fieldsOnly?: BookRecord[] } = {}): CatalogueSource => ({
   lookupIsbn: async () => null,
   search: async (q) => {
     if (opts.down) throw new Error("offline");
     const words = q.toLowerCase().split(/\s+/);
     return records.filter((r) => words.some((w) => w.length > 2 && r.title.toLowerCase().includes(w)));
+  },
+  searchByTitle: async (title) => {
+    if (opts.down) throw new Error("offline");
+    return (opts.fieldsOnly ?? []).filter((r) => r.title.toLowerCase() === title.toLowerCase());
   },
 });
 const image = new Uint8Array([1, 2, 3]);
@@ -202,6 +208,30 @@ describe("review and commit", () => {
   });
 });
 
+describe("lessons from a real shelf photo", () => {
+  it("accepts a co-author or translator anywhere in the author list", () => {
+    const s = spine("Hans Werner Holzwarth Basquiat 40 TASCHEN", "Basquiat", "Hans Werner Holzwarth");
+    expect(scoreCandidate(s, { title: "Basquiat", authors: ["Eleanor Nairne", "Hans Werner Holzwarth"] })).toBeGreaterThanOrEqual(0.8);
+    const plague = spine("Albert Camus The Plague MODERN CLASSICS", "The Plague", "Albert Camus");
+    expect(scoreCandidate(plague, { title: "The Plague", authors: ["Robin Buss", "Albert Camus"] })).toBeGreaterThanOrEqual(0.95);
+  });
+  it("reads only the main title of edition-flavoured records", () => {
+    const s = spine("Basquiat Holzwarth", "Basquiat", "Hans Werner Holzwarth");
+    expect(scoreCandidate(s, { title: "Basquiat - 40th Anniversary Edition", authors: ["Hans Werner Holzwarth"] })).toBeGreaterThanOrEqual(0.8);
+  });
+  it("doesn't let the byline match a volume titled after the author", () => {
+    const s = spine("17212 Sternstunden der Menschheit Stefan Zweig Fischer", "Sternstunden der Menschheit", "Stefan Zweig");
+    expect(scoreCandidate(s, { title: "Stefan Zweig", authors: ["Stefan Zweig"] })).toBe(0);
+    expect(scoreCandidate(s, { title: "Sternstunden der Menschheit", authors: ["Stefan Zweig"] })).toBe(1);
+  });
+  it("falls back to a title + author search when free text finds nothing", async () => {
+    const { rows } = await snap([spine("SHOW DON'T TELL CURTIS SITTENFELD", "Show Don't Tell", "Curtis Sittenfeld")], [], null, {
+      fieldsOnly: [book("Show Don't Tell", "Curtis Sittenfeld")],
+    });
+    expect(rows[0]!.state).toBe("matched");
+  });
+});
+
 describe("truncated and noisy spines", () => {
   it("never reaches confident from a fragment alone", () => {
     expect(scoreCandidate(spine("THE REMAINS OF THE"), { title: "The Remains of the Day", authors: ["Kazuo Ishiguro"] })).toBeLessThan(0.8);
@@ -212,5 +242,74 @@ describe("truncated and noisy spines", () => {
   });
   it("still finds a book under publisher noise when the author is read", () => {
     expect(scoreCandidate(spine("PIRANESI SUSANNA CLARKE BLOOMSBURY", "Piranesi", "Susanna Clarke"), { title: "Piranesi", authors: ["Susanna Clarke"] })).toBeGreaterThanOrEqual(0.8);
+  });
+});
+
+describe("manual correction and manual add", () => {
+  const order = async (sessionId: string) =>
+    (
+      await db.query.snapSpines.findMany({ where: eq(snapSpines.sessionId, sessionId), orderBy: [asc(snapSpines.ordinal)], with: { chosenEdition: true } })
+    ).map((s) => s.chosenEdition?.title ?? `?${s.rawText}`);
+
+  it("corrects a confident match to a different book the user searched for", async () => {
+    const { rows } = await snap([spine("STONER JOHN WILLIAMS", "Stoner", "John Williams")], [book("Stoner", "John Williams")]);
+    const other = await addBook(db, "Augustus", "John Williams");
+    await correctSpine(db, me, rows[0]!.id, { editionId: other.editionId });
+    const fixed = await db.query.snapSpines.findFirst({ where: eq(snapSpines.id, rows[0]!.id) });
+    expect(fixed).toMatchObject({ state: "confirmed", chosenEditionId: other.editionId });
+  });
+
+  it("creates a book the user types in when the catalogue has nothing", async () => {
+    const { session, rows } = await snap([spine("ACHT BERGE PAOLO COGNETTI")]);
+    expect(rows[0]!.state).toBe("unmatched");
+    await correctSpine(db, me, rows[0]!.id, { title: "  Acht Berge ", author: "Paolo Cognetti" });
+    expect(await commitSnap(db, me, session.id)).toEqual({ added: 1 });
+    const work = await db.query.works.findFirst({ where: (t, { eq }) => eq(t.title, "Acht Berge") });
+    expect(work?.authors).toEqual(["Paolo Cognetti"]);
+  });
+
+  it("rejects a typed-in book without a title or with a bad ISBN", async () => {
+    const { rows } = await snap([spine("~~~ smudge")]);
+    await expect(correctSpine(db, me, rows[0]!.id, { title: "  " })).rejects.toMatchObject({ code: "invalid_input" });
+    await expect(createManualBook(db, { title: "X", isbn: "123" })).rejects.toMatchObject({ code: "invalid_input" });
+  });
+
+  it("inserts a missed book at the right place so the shelf order matches", async () => {
+    const { session } = await snap(
+      [spine("STONER JOHN WILLIAMS", "Stoner", "John Williams"), spine("PIRANESI SUSANNA CLARKE", "Piranesi", "Susanna Clarke")],
+      [book("Stoner", "John Williams"), book("Piranesi", "Susanna Clarke")],
+    );
+    await addMissedBook(db, me, session.id, { title: "Sult", author: "Knut Hamsun" }, 0);
+    await addMissedBook(db, me, session.id, { title: "Beloved", author: "Toni Morrison" }, null);
+    await addMissedBook(db, me, session.id, { title: "Orlando", author: "Virginia Woolf" }, 3);
+    expect(await order(session.id)).toEqual(["Beloved", "Stoner", "Sult", "Piranesi", "Orlando"]);
+
+    const shelf = await createLocation(db, me, { name: "Shelf" });
+    await db.update(snapSessions).set({ locationId: shelf.id }).where(eq(snapSessions.id, session.id));
+    await confirmAllMatched(db, me, session.id);
+    expect(await commitSnap(db, me, session.id)).toEqual({ added: 5 });
+    const onShelf = await db.query.copies.findMany({ where: eq(copies.locationId, shelf.id), orderBy: [asc(copies.position)], with: { edition: true } });
+    expect(onShelf.map((c) => c.edition.title)).toEqual(["Beloved", "Stoner", "Sult", "Piranesi", "Orlando"]);
+  });
+
+  it("works on a photo where nothing was found", async () => {
+    const { session } = await snap([]);
+    await addMissedBook(db, me, session.id, { title: "Sult", author: "Knut Hamsun" }, null);
+    expect(await commitSnap(db, me, session.id)).toEqual({ added: 1 });
+  });
+
+  it("validates the position and locks after commit", async () => {
+    const { session } = await snap([spine("STONER JOHN WILLIAMS", "Stoner", "John Williams")], [book("Stoner", "John Williams")]);
+    await expect(addMissedBook(db, me, session.id, { title: "X" }, 5)).rejects.toMatchObject({ code: "invalid_input" });
+    await expect(addMissedBook(db, me, session.id, { title: "X" }, -1)).rejects.toMatchObject({ code: "invalid_input" });
+    await commitSnap(db, me, session.id);
+    await expect(addMissedBook(db, me, session.id, { title: "X" }, null)).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("is private to the owner", async () => {
+    const { session, rows } = await snap([spine("STONER JOHN WILLIAMS", "Stoner", "John Williams")], [book("Stoner", "John Williams")]);
+    const other = await makeUser(db, "Other");
+    await expect(addMissedBook(db, other, session.id, { title: "X" }, null)).rejects.toMatchObject({ code: "not_found" });
+    await expect(correctSpine(db, other, rows[0]!.id, { title: "X" })).rejects.toMatchObject({ code: "not_found" });
   });
 });

@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
-import { addCopyAction, lookupIsbnAction, searchBooksAction, setStatusAction, type FoundBook } from "@/app/actions/books";
+import { addCopyAction, addManualBookAction, lookupIsbnAction, searchBooksAction, setStatusAction, type FoundBook } from "@/app/actions/books";
+import { ManualBookForm } from "@/components/manual-book-form";
 import { Cover } from "@/components/cover";
 import { Button, ErrorText, Input } from "@/components/ui";
 
@@ -23,6 +24,8 @@ export function FindBook() {
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const [scanning, setScanning] = useState(false);
+  const [manual, setManual] = useState(false);
+  const searched = results !== null || error !== null;
 
   const search = (query: string) =>
     start(async () => {
@@ -71,13 +74,38 @@ export function FindBook() {
         />
       )}
       <ErrorText>{error}</ErrorText>
-      {results && results.length === 0 && <p className="text-ink-2">No books found. Try fewer words, or the ISBN.</p>}
+      {results && results.length === 0 && !manual && <p className="text-ink-2">No books found. Try fewer words or the ISBN — or add it by hand below.</p>}
       {results && results.length > 0 && (
         <ul className="flex flex-col border-t border-rule">
           {results.map((b) => (
             <Result key={b.workId} book={b} />
           ))}
         </ul>
+      )}
+      {manual ? (
+        <ManualBookForm
+          initial={{ title: looksLikeIsbn(q) ? "" : q, isbn: looksLikeIsbn(q) ? q : "" }}
+          submits={[
+            { label: "I own this", value: "own" },
+            { label: "Want to read", value: "want" },
+          ]}
+          pending={pending}
+          onSubmit={(book, intent) =>
+            start(async () => {
+              setError(null);
+              const res = await addManualBookAction(book, intent);
+              if (res.ok) router.push(`/book/${res.data}`);
+              else setError(res.error);
+            })
+          }
+          onCancel={() => setManual(false)}
+        />
+      ) : (
+        searched && (
+          <button className="self-start text-sm text-ink-2 underline underline-offset-4 hover:text-ink" onClick={() => setManual(true)}>
+            Can&apos;t find it? Add it by hand
+          </button>
+        )
       )}
     </div>
   );

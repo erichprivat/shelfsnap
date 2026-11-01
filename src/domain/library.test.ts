@@ -52,6 +52,12 @@ describe("library views", () => {
     });
   });
 
+  it("shows the title of the edition you own, not the work's original title", async () => {
+    const { editionId } = await upsertBook(db, { title: "La Peste", authors: ["Albert Camus"], openLibraryKey: "/works/OL1W", edition: { title: "The Plague", openLibraryKey: "/books/OL2M" } });
+    await addCopy(db, me, { editionId });
+    expect((await libraryItems(db, me))[0]!.title).toBe("The Plague");
+  });
+
   it("never shows another user's books", async () => {
     const other = await makeUser(db, "Other");
     await addCopy(db, other, { editionId: (await addBook(db, "Theirs", "X")).editionId });

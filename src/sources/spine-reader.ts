@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { readFile } from "node:fs/promises";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import sharp from "sharp";
 import { z } from "zod";
@@ -34,9 +35,25 @@ const PROMPT = `This is a photo of a bookshelf. List every book spine you can se
 For each spine give the legible text, your best reading of title and author, and its bounding box in pixels of this image.
 Include spines you can only partly read — use null for title/author when you genuinely can't tell. Skip objects that aren't books.`;
 
+const isHeif = (b: Uint8Array) => {
+  const brand = new TextDecoder().decode(b.subarray(4, 12));
+  return brand.startsWith("ftyp") && /hei[cfmsx]|mif1|msf1|hevc/.test(brand.slice(4));
+};
+
+/**
+ * sharp's prebuilt binaries can't decode HEVC (patent-encumbered), which is what iPhones save.
+ * Decode those with libheif compiled to WebAssembly and hand sharp raw pixels instead.
+ */
+async function openImage(input: Uint8Array) {
+  if (!isHeif(input)) return sharp(input);
+  const { default: decode } = await import("heic-decode");
+  const { width, height, data } = await decode({ buffer: input });
+  return sharp(Buffer.from(data.buffer, data.byteOffset, data.byteLength), { raw: { width, height, channels: 4 } });
+}
+
 /** Upright, downscaled JPEG so EXIF rotation and huge phone photos never reach the model. */
 export async function prepareImage(input: Uint8Array) {
-  const { data, info } = await sharp(input)
+  const { data, info } = await (await openImage(input))
     .rotate()
     .resize({ width: MAX_EDGE, height: MAX_EDGE, fit: "inside", withoutEnlargement: true })
     .jpeg({ quality: 85 })
@@ -114,6 +131,17 @@ export class DemoSpineReader implements SpineReader {
   }
 }
 
+/** Development only: replays a recorded reading from a JSON file, so matching and review can be tested on a real photo offline. */
+export class FixtureSpineReader implements SpineReader {
+  readonly name = "fixture";
+  constructor(private readonly path: string) {}
+  async read(): Promise<DetectedSpine[]> {
+    return JSON.parse(await readFile(this.path, "utf8")) as DetectedSpine[];
+  }
+}
+
 export function defaultSpineReader(): SpineReader {
+  const fixture = process.env.SPINE_READER_FIXTURE;
+  if (fixture && process.env.NODE_ENV !== "production") return new FixtureSpineReader(fixture);
   return process.env.ANTHROPIC_API_KEY ? new ClaudeSpineReader() : new DemoSpineReader();
 }

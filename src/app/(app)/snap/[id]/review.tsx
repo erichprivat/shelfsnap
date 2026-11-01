@@ -1,15 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { searchBooksAction, type FoundBook } from "@/app/actions/books";
-import { commitSnapAction, confirmAllAction, confirmSpineAction, rejectSpineAction, retrySnapAction } from "@/app/actions/snap";
-import { Cover } from "@/components/cover";
-import { Button, ErrorText, Input, LinkButton } from "@/components/ui";
+import {
+  addMissedBookAction,
+  commitSnapAction,
+  confirmAllAction,
+  confirmSpineAction,
+  correctSpineAction,
+  rejectSpineAction,
+  retrySnapAction,
+} from "@/app/actions/snap";
+import { BookLine, type BookSummary } from "@/components/book-line";
+import { BookPicker } from "@/components/book-picker";
+import { Button, ErrorText, LinkButton, Select } from "@/components/ui";
 import type { BoundingBox } from "@/db/schema";
 import { useAction } from "@/lib/use-action";
 import { plural } from "@/lib/labels";
 
-type Book = { editionId: string; workId: string; title: string; authors: string[]; year: number | null; coverUrl: string | null };
+type Book = BookSummary;
 type State = "matched" | "ambiguous" | "unmatched" | "duplicate" | "confirmed" | "rejected";
 export type ReviewSpine = { id: string; ordinal: number; rawText: string; state: State; box: BoundingBox | null; chosen: Book | null; candidates: Book[] };
 
@@ -21,6 +29,8 @@ const TONE: Record<State, { label: string; dot: string; text: string }> = {
   duplicate: { label: "You own this already", dot: "bg-ochre", text: "text-ochre" },
   rejected: { label: "Skipped", dot: "bg-ink-3", text: "text-ink-3" },
 };
+
+const ADDED_BY_HAND = { label: "Added by hand", dot: "bg-moss", text: "text-moss" };
 
 const COMMITTED = {
   added: { label: "Added", dot: "bg-moss", text: "text-moss" },
@@ -67,12 +77,13 @@ export function Review({ sessionId, status, error, place, spines }: { sessionId:
             {matched + confirmed} recognised{open > 0 && <>, {plural(open, "needs", "need")} a look</>}. Nothing is added until you press the button at the bottom.
           </p>
         )}
-        {spines.length === 0 && <p className="text-[15px] text-ink-2">Try a closer, straighter photo with the spines filling the frame.</p>}
+        {spines.length === 0 && <p className="text-[15px] text-ink-2">Try a closer, straighter photo with the spines filling the frame — or add the books by hand.</p>}
       </header>
+      {spines.length === 0 && !committed && <MissedBook sessionId={sessionId} spines={spines} />}
 
       {spines.length > 0 && (
-        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:items-start">
-          <figure className="relative overflow-hidden bg-ink/90 lg:sticky lg:top-8">
+        <div className="grid gap-8 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] xl:items-start">
+          <figure className="relative overflow-hidden bg-ink/90 xl:sticky xl:top-8">
             {/* eslint-disable-next-line @next/next/no-img-element -- private, auth-checked photo */}
             <img src={`/api/snaps/${sessionId}/photo`} alt="Your shelf" className="block h-auto w-full" />
             {spines.map((s) =>
@@ -96,11 +107,14 @@ export function Review({ sessionId, status, error, place, spines }: { sessionId:
             )}
           </figure>
 
-          <ol className="flex flex-col border-t border-rule">
-            {spines.map((s) => (
-              <SpineRow key={s.id} sessionId={sessionId} spine={s} active={active === s.ordinal} locked={committed} onFocus={() => setActive(s.ordinal)} />
-            ))}
-          </ol>
+          <div className="flex flex-col gap-5">
+            <ol className="flex flex-col border-t border-rule">
+              {spines.map((s) => (
+                <SpineRow key={s.id} sessionId={sessionId} spine={s} active={active === s.ordinal} locked={committed} onFocus={() => setActive(s.ordinal)} />
+              ))}
+            </ol>
+            {!committed && <MissedBook sessionId={sessionId} spines={spines} />}
+          </div>
         </div>
       )}
 
@@ -149,9 +163,19 @@ export function Review({ sessionId, status, error, place, spines }: { sessionId:
 function SpineRow({ sessionId, spine, active, locked, onFocus }: { sessionId: string; spine: ReviewSpine; active: boolean; locked: boolean; onFocus: () => void }) {
   const { pending, error, go } = useAction();
   const [searching, setSearching] = useState(false);
+  const byHand = spine.rawText === "";
   let tone = TONE[spine.state];
+  if (byHand) tone = ADDED_BY_HAND;
   if (locked) tone = spine.state === "confirmed" ? COMMITTED.added : COMMITTED.skipped;
   const pickable = spine.state === "ambiguous" || spine.state === "unmatched";
+  const picker = (
+    <BookPicker
+      initialQuery={spine.chosen ? "" : spine.rawText}
+      pending={pending}
+      onPick={(book) => go(() => correctSpineAction(sessionId, spine.id, book), () => setSearching(false))}
+      onCancel={() => setSearching(false)}
+    />
+  );
   return (
     <li
       id={`spine-${spine.ordinal}`}
@@ -168,10 +192,16 @@ function SpineRow({ sessionId, spine, active, locked, onFocus }: { sessionId: st
         )}
         <div className="flex min-w-0 items-center gap-2 text-xs">
           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} />
-          <span className={`font-medium whitespace-nowrap ${tone.text}`} title={`Read from the spine as “${spine.rawText}”`}>
+          <span className={`font-medium whitespace-nowrap ${tone.text}`} title={byHand ? undefined : `Read from the spine as “${spine.rawText}”`}>
             {tone.label}
           </span>
+          {!locked && !pickable && !searching && (
+            <button className="ml-1 text-ink-3 underline-offset-4 hover:text-ink hover:underline" onClick={() => setSearching(true)}>
+              Wrong book?
+            </button>
+          )}
         </div>
+        {!locked && !pickable && searching && picker}
         {pickable && !locked && (
           <div className="flex flex-col gap-2">
             {spine.candidates.map((c) => (
@@ -185,7 +215,7 @@ function SpineRow({ sessionId, spine, active, locked, onFocus }: { sessionId: st
               </button>
             ))}
             {searching ? (
-              <SpineSearch onPick={(b) => go(() => confirmSpineAction(sessionId, spine.id, b.editionId))} initial={spine.rawText} />
+              picker
             ) : (
               <button className="self-start text-[13px] text-ink-2 underline underline-offset-4 hover:text-ink" onClick={() => setSearching(true)}>
                 {spine.candidates.length ? "None of these — search" : "Search for it"}
@@ -218,51 +248,42 @@ function SpineRow({ sessionId, spine, active, locked, onFocus }: { sessionId: st
   );
 }
 
-function BookLine({ book, compact }: { book: Book; compact?: boolean }) {
-  return (
-    <span className="flex items-center gap-3">
-      <Cover seed={book.workId} title={book.title} authors={book.authors} url={book.coverUrl} size="sm" className={compact ? "w-8" : "w-10"} />
-      <span className="flex min-w-0 flex-col">
-        <span className="line-clamp-2 font-serif text-[16px] leading-snug">{book.title}</span>
-        <span className="truncate text-[13px] text-ink-3">
-          {book.authors[0] ?? "Unknown author"}
-          {book.year ? ` · ${book.year}` : ""}
-        </span>
-      </span>
-    </span>
-  );
-}
-
-function SpineSearch({ onPick, initial }: { onPick: (b: FoundBook) => void; initial: string }) {
-  const [q, setQ] = useState(initial.slice(0, 80));
-  const [results, setResults] = useState<FoundBook[] | null>(null);
+/** For books the photo didn't pick up: choose where on the shelf it stands, then find or type it. */
+function MissedBook({ sessionId, spines }: { sessionId: string; spines: ReviewSpine[] }) {
   const { pending, error, go } = useAction();
+  const [open, setOpen] = useState(false);
+  const last = spines.length - 1;
+  const [after, setAfter] = useState<string>(last >= 0 ? String(last) : "start");
+  if (!open) {
+    return (
+      <button className="self-start text-sm text-ink-2 underline underline-offset-4 hover:text-ink" onClick={() => setOpen(true)}>
+        + Missed a book? Add it to this shelf
+      </button>
+    );
+  }
+  const label = (s: ReviewSpine) => s.chosen?.title ?? `“${s.rawText.slice(0, 30)}”`;
   return (
-    <div className="flex flex-col gap-2">
-      <form
-        className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          go(async () => {
-            const res = await searchBooksAction(q);
-            if (res.ok) setResults(res.data);
-            return res;
-          });
-        }}
-      >
-        <Input value={q} onChange={(e) => setQ(e.target.value)} className="h-9 text-sm" aria-label="Search for this book" autoFocus />
-        <Button size="sm" variant="line" disabled={pending}>
-          {pending ? "…" : "Search"}
-        </Button>
-      </form>
-      {results?.length === 0 && <p className="text-sm text-ink-3">No results. Try fewer words.</p>}
-      {results?.map((b) => (
-        <button key={b.workId} onClick={() => onPick(b)} className="rounded-[3px] border border-rule p-2 text-left hover:border-ink">
-          <BookLine book={b} compact />
-        </button>
-      ))}
+    <div className="flex flex-col gap-3 border border-rule bg-paper-raised p-4">
+      <span className="font-serif text-lg">Add a missed book</span>
+      {spines.length > 0 && (
+        <label className="flex flex-col gap-1.5">
+          <span className="label">Where does it stand?</span>
+          <Select value={after} onChange={(e) => setAfter(e.target.value)} className="h-9 text-sm sm:max-w-sm">
+            <option value="start">At the start of the shelf</option>
+            {spines.map((s) => (
+              <option key={s.id} value={String(s.ordinal)}>
+                After {s.ordinal + 1} · {label(s)}
+              </option>
+            ))}
+          </Select>
+        </label>
+      )}
+      <BookPicker
+        pending={pending}
+        onPick={(book) => go(() => addMissedBookAction(sessionId, book, after === "start" ? null : Number(after)), () => setOpen(false))}
+        onCancel={() => setOpen(false)}
+      />
       <ErrorText>{error}</ErrorText>
     </div>
   );
 }
-

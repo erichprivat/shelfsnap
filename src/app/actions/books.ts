@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { readingStatuses, type CopyFormat, type ReadingStatus } from "@/db/schema";
-import { resolveIsbn, searchLocal, upsertBook } from "@/domain/catalogue";
+import { createManualBook, resolveIsbn, searchLocal, upsertBook } from "@/domain/catalogue";
 import { addCopy, lendCopy, moveCopy, removeCopy, reorderCopy, returnCopy, updateCopyDetails } from "@/domain/copies";
 import { invalid } from "@/domain/errors";
 import { clearStatus, deleteReadThrough, setStatus, startReread, updateReadThrough } from "@/domain/reading";
@@ -172,4 +172,16 @@ export async function searchBooksAction(query: string) {
 export async function lookupIsbnAction(isbn: string) {
   await requireUser();
   return run(async () => resolveIsbn(db, catalogueSource, isbn));
+}
+
+/** Adds a book the catalogue doesn't know, typed in by the user, as owned or wanted. */
+export async function addManualBookAction(input: { title: string; author?: string | null; isbn?: string | null }, intent: "own" | "want") {
+  const user = await requireUser();
+  return run(async () => {
+    const { workId, editionId } = await createManualBook(db, input);
+    if (intent === "own") await addCopy(db, user.id, { editionId });
+    else await setStatus(db, user.id, workId, "want_to_read");
+    touched(workId);
+    return workId;
+  });
 }

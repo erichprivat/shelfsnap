@@ -32,6 +32,8 @@ export type BookRecord = {
 export interface CatalogueSource {
   lookupIsbn(isbn: Isbn13): Promise<BookRecord | null>;
   search(query: string, limit: number): Promise<BookRecord[]>;
+  /** Field search: finds titles that free-text search misses (apostrophes, very short titles). */
+  searchByTitle(title: string, author: string | null, limit: number): Promise<BookRecord[]>;
 }
 
 export type CatalogueEntry = { workId: string; editionId: string };
@@ -199,4 +201,22 @@ export async function searchLocal(db: Db, query: string, limit = 10) {
     with: { editions: true },
     limit,
   });
+}
+
+const MAX_TITLE = 300;
+const MAX_AUTHOR = 200;
+
+/** A book the user typed in because the catalogue doesn't have it. Reuses an existing match if there is one. */
+export async function createManualBook(db: Db, input: { title: string; author?: string | null; isbn?: string | null }) {
+  const title = clean(input.title);
+  if (!title) throw new DomainError("invalid_input", "Give the book a title");
+  if (title.length > MAX_TITLE) throw new DomainError("invalid_input", "That title is too long");
+  const author = clean(input.author);
+  if (author && author.length > MAX_AUTHOR) throw new DomainError("invalid_input", "That author name is too long");
+  let isbn13: Isbn13 | null = null;
+  if (clean(input.isbn)) {
+    isbn13 = parseIsbn(input.isbn);
+    if (!isbn13) throw new DomainError("invalid_input", "That ISBN doesn't look right — leave it empty if unsure");
+  }
+  return upsertBook(db, { title, authors: author ? [author] : [], edition: { isbn13, binding: "unknown" } });
 }
