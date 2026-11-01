@@ -8,12 +8,7 @@ import { ManualBookForm } from "@/components/manual-book-form";
 import { Cover } from "@/components/cover";
 import { Button, ErrorText, Input } from "@/components/ui";
 
-type Detector = { detect(source: CanvasImageSource): Promise<{ rawValue: string }[]> };
-declare global {
-  interface Window {
-    BarcodeDetector?: new (opts: { formats: string[] }) => Detector;
-  }
-}
+const TYPE_IT = "This browser can't scan barcodes. Type the 13-digit number under the barcode instead.";
 
 const looksLikeIsbn = (q: string) => /^[\d\s-]{9,17}[\dxX]$/.test(q.trim());
 
@@ -67,9 +62,9 @@ export function FindBook() {
             setQ(code);
             search(code);
           }}
-          onUnsupported={() => {
+          onError={(message) => {
             setScanning(false);
-            setError("This browser can't scan barcodes. Type the 13-digit number under the barcode instead.");
+            setError(message);
           }}
         />
       )}
@@ -162,37 +157,44 @@ function Result({ book }: { book: FoundBook }) {
   );
 }
 
-function Scanner({ onCode, onUnsupported }: { onCode: (code: string) => void; onUnsupported: () => void }) {
+function Scanner({ onCode, onError }: { onCode: (code: string) => void; onError: (message: string) => void }) {
   const video = useRef<HTMLVideoElement>(null);
+  const callbacks = useRef({ onCode, onError });
   useEffect(() => {
-    if (!window.BarcodeDetector || !navigator.mediaDevices?.getUserMedia) {
-      onUnsupported();
-      return;
-    }
-    const detector = new window.BarcodeDetector({ formats: ["ean_13"] });
+    callbacks.current = { onCode, onError };
+  });
+  useEffect(() => {
     let stream: MediaStream | null = null;
     let stopped = false;
     (async () => {
+      if (!navigator.mediaDevices?.getUserMedia) return callbacks.current.onError(TYPE_IT);
       try {
         stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-        if (stopped || !video.current) return;
-        video.current.srcObject = stream;
+      } catch (e) {
+        const denied = e instanceof DOMException && e.name === "NotAllowedError";
+        return callbacks.current.onError(denied ? "Readmoth isn't allowed to use the camera. Allow it in your browser settings, or type the 13-digit number under the barcode." : TYPE_IT);
+      }
+      if (stopped || !video.current) return stream.getTracks().forEach((t) => t.stop());
+      video.current.srcObject = stream;
+      try {
         await video.current.play();
+        const { isbnDetector, isIsbnBarcode } = await import("@/lib/isbn-scanner");
+        const detector = await isbnDetector();
         while (!stopped) {
-          const codes = await detector.detect(video.current).catch(() => []);
-          const isbn = codes.map((c) => c.rawValue).find((v) => /^97[89]\d{10}$/.test(v));
-          if (isbn) return onCode(isbn);
-          await new Promise((r) => setTimeout(r, 250));
+          const codes = video.current.readyState >= 2 ? await detector.detect(video.current).catch(() => []) : [];
+          const isbn = codes.map((c) => c.rawValue).find(isIsbnBarcode);
+          if (isbn) return callbacks.current.onCode(isbn);
+          await new Promise((r) => setTimeout(r, 200));
         }
       } catch {
-        onUnsupported();
+        if (!stopped) callbacks.current.onError(TYPE_IT);
       }
     })();
     return () => {
       stopped = true;
       stream?.getTracks().forEach((t) => t.stop());
     };
-  }, [onCode, onUnsupported]);
+  }, []);
   return (
     <div className="relative aspect-video max-w-xl overflow-hidden bg-ink">
       <video ref={video} className="h-full w-full object-cover" muted playsInline />
