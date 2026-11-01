@@ -55,8 +55,11 @@ fly auth login
 fly launch --no-deploy --copy-config      # first time only; keeps fly.toml, creates the app
 fly volumes create shelfsnap_data --region arn --size 3
 fly secrets set BETTER_AUTH_SECRET="$(openssl rand -hex 32)" ANTHROPIC_API_KEY=… RESEND_API_KEY=… EMAIL_FROM="Readmoth <hello@your-domain>"
-fly deploy --ha=false                     # one machine: SQLite on a volume can't be shared
+bun run deploy                            # wakes the machine, deploys, fails if Fly ever runs a second one
 ```
+
+SQLite on a volume can't be shared, so the app must run on exactly one machine; deploy through
+`bun run deploy` rather than plain `fly deploy`.
 
 ## Checks
 
