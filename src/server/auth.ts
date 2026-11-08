@@ -26,11 +26,15 @@ export const enabledSocialProviders = Object.keys(socialProviders) as ("google" 
 export const auth = betterAuth({
   database: drizzleAdapter(db, { provider: "sqlite", schema }),
   socialProviders,
-  account: { accountLinking: { enabled: true, trustedProviders: ["google", "apple"] } },
+  // Readers can connect a Google or Apple account with a different address from the account page.
+  // Unlinking every provider is fine: the email link always works.
+  account: { accountLinking: { enabled: true, trustedProviders: ["google", "apple"], allowDifferentEmails: true, allowUnlinkingAll: true } },
   session: { expiresIn: 60 * 60 * 24 * 60, updateAge: 60 * 60 * 24 },
   trustedOrigins: process.env.BETTER_AUTH_URL ? [process.env.BETTER_AUTH_URL] : undefined,
   // Backstop for every sign-in route; the magic-link form checks first so uninvited readers aren't emailed a dead link.
   databaseHooks: { user: { create: { before: async (u) => (canSignUp(u.email) ? undefined : false) } } },
+  // Fly puts the visitor's address in Fly-Client-IP; without it, rate limits share one bucket for everyone.
+  advanced: { ipAddress: { ipAddressHeaders: ["fly-client-ip", "x-forwarded-for"] } },
   plugins: [
     magicLink({
       expiresIn: 60 * 15,

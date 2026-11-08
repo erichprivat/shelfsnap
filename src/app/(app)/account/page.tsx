@@ -2,12 +2,15 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { signOutAction } from "@/app/actions/account";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
+import { account } from "@/db/schema";
 import { libraryItems } from "@/domain/library";
 import { Button, PageHead } from "@/components/ui";
 import { plural } from "@/lib/labels";
-import { requireUser } from "@/server/auth";
+import { enabledSocialProviders, requireUser } from "@/server/auth";
 import { DeleteAccount } from "./delete-account";
+import { SignInMethods } from "./sign-in-methods";
 
 export const metadata: Metadata = { title: "Account" };
 
@@ -21,9 +24,14 @@ function Row({ title, children, aside }: { title: string; children: ReactNode; a
   );
 }
 
-export default async function AccountPage() {
+export default async function AccountPage({ searchParams }: PageProps<"/account">) {
   const user = await requireUser();
   const books = (await libraryItems(db, user.id)).length;
+  const linked = enabledSocialProviders.length
+    ? await db.select({ id: account.id, providerId: account.providerId }).from(account).where(and(eq(account.userId, user.id), inArray(account.providerId, enabledSocialProviders)))
+    : [];
+  const connected = enabledSocialProviders.flatMap((provider) => linked.filter((a) => a.providerId === provider).map((a) => ({ provider, id: a.id })));
+  const connectFailed = (await searchParams).connect === "failed";
   return (
     <div className="flex flex-col">
       <PageHead eyebrow="Account" title="Your account" />
@@ -38,6 +46,12 @@ export default async function AccountPage() {
         <p className="text-ink">{user.email}</p>
         <p>Sign-in links go to this address. There is no password to forget.</p>
       </Row>
+      {enabledSocialProviders.length > 0 && (
+        <Row title="Sign in faster">
+          <p>Connect your Google account to sign in with one tap. It works even if it uses a different address.</p>
+          <SignInMethods providers={enabledSocialProviders} connected={connected} failed={connectFailed} />
+        </Row>
+      )}
       <Row
         title="Take it with you"
         aside={
