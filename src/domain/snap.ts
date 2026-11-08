@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, eq, gt, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import type { Db, DbLike } from "@/db";
 import { copies, editions, snapSessions, snapSpines, type SpineCandidate } from "@/db/schema";
 import type { DetectedSpine, SpineReader } from "@/sources/spine-reader";
@@ -187,14 +187,36 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
   return out;
 }
 
-async function ownedWorkIds(db: DbLike, userId: string, workIds: string[]) {
+/** Of these works, the ones the reader owns — or, with `since`, added to their library after that moment. */
+async function ownedWorkIds(db: DbLike, userId: string, workIds: string[], since?: Date) {
   if (workIds.length === 0) return new Set<string>();
   const rows = await db
     .selectDistinct({ workId: editions.workId })
     .from(copies)
     .innerJoin(editions, eq(copies.editionId, editions.id))
-    .where(and(eq(copies.userId, userId), inArray(editions.workId, workIds)));
+    .where(and(eq(copies.userId, userId), inArray(editions.workId, workIds), since ? gt(copies.createdAt, since) : undefined));
   return new Set(rows.map((r) => r.workId));
+}
+
+async function workIdsOf(db: DbLike, editionIds: string[]) {
+  if (editionIds.length === 0) return new Map<string, string>();
+  const rows = await db.select({ id: editions.id, workId: editions.workId }).from(editions).where(inArray(editions.id, editionIds));
+  return new Map(rows.map((r) => [r.id, r.workId]));
+}
+
+/**
+ * Overlapping photos of one shelf: a book matched here may have been added from another photo since this one
+ * was read. Turns those matches into duplicates so they wait for an explicit decision. Returns how many changed.
+ */
+export async function markNewDuplicates(db: DbLike, userId: string, sessionId: string) {
+  const session = await getOwnedSession(db, userId, sessionId);
+  if (session.status !== "ready") return 0;
+  const matched = await db.query.snapSpines.findMany({ where: and(eq(snapSpines.sessionId, sessionId), eq(snapSpines.state, "matched")) });
+  const works = await workIdsOf(db, matched.flatMap((s) => (s.chosenEditionId ? [s.chosenEditionId] : [])));
+  const owned = await ownedWorkIds(db, userId, [...new Set(works.values())]);
+  const now = matched.filter((s) => s.chosenEditionId && owned.has(works.get(s.chosenEditionId)!)).map((s) => s.id);
+  if (now.length) await db.update(snapSpines).set({ state: "duplicate" }).where(inArray(snapSpines.id, now));
+  return now.length;
 }
 
 /** Reads the photo and stores one row per spine with ranked candidates. Never throws for reader failures: the session records them. */
@@ -280,6 +302,7 @@ export async function rejectSpine(db: DbLike, userId: string, spineId: string) {
 export async function confirmAllMatched(db: DbLike, userId: string, sessionId: string) {
   const session = await getOwnedSession(db, userId, sessionId);
   if (session.status !== "ready") throw invalid("This photo isn't ready for review");
+  await markNewDuplicates(db, userId, sessionId);
   const res = await db
     .update(snapSpines)
     .set({ state: "confirmed" })
@@ -292,11 +315,15 @@ export async function confirmAllMatched(db: DbLike, userId: string, sessionId: s
  * Adds confirmed spines to the library as physical copies, in shelf order,
  * after whatever is already in the location. Safe to call twice.
  */
-/** `photo` is the stored photo this commit made obsolete, for the caller to delete. */
-export async function commitSnap(db: Db, userId: string, sessionId: string): Promise<{ added: number; photo: string | null }> {
+/**
+ * `skipped` counts confirmed books another photo added after this one was read; books the reader already owned
+ * when it was read were shown as duplicates, so confirming those is a deliberate second copy.
+ * `photo` is the stored photo this commit made obsolete, for the caller to delete.
+ */
+export async function commitSnap(db: Db, userId: string, sessionId: string): Promise<{ added: number; skipped: number; photo: string | null }> {
   return db.transaction(async (tx) => {
     const session = await getOwnedSession(tx, userId, sessionId);
-    if (session.status === "committed") return { added: 0, photo: null };
+    if (session.status === "committed") return { added: 0, skipped: 0, photo: null };
     if (session.status !== "ready") throw invalid("This photo isn't ready for review");
 
     const confirmed = await tx.query.snapSpines.findMany({
@@ -307,21 +334,27 @@ export async function commitSnap(db: Db, userId: string, sessionId: string): Pro
       eq(copies.userId, userId),
       session.locationId ? eq(copies.locationId, session.locationId) : isNull(copies.locationId),
     );
+    const works = await workIdsOf(tx, confirmed.flatMap((s) => (s.chosenEditionId ? [s.chosenEditionId] : [])));
+    const addedElsewhere = await ownedWorkIds(tx, userId, [...new Set(works.values())], session.createdAt);
+    const toAdd = confirmed.filter((s) => s.chosenEditionId && !addedElsewhere.has(works.get(s.chosenEditionId)!));
     const [end] = await tx.select({ p: sql<number | null>`max(${copies.position})` }).from(copies).where(scope);
     let pos = end?.p ?? null;
-    for (const spine of confirmed) {
-      if (!spine.chosenEditionId) continue;
+    for (const spine of toAdd) {
       pos = positionBetween(pos, null);
       await tx.insert(copies).values({
         userId,
-        editionId: spine.chosenEditionId,
+        editionId: spine.chosenEditionId!,
         format: "physical",
         locationId: session.locationId,
         position: pos,
       });
     }
     await tx.update(snapSessions).set({ status: "committed", photoDeletedAt: session.photoDeletedAt ?? new Date() }).where(eq(snapSessions.id, sessionId));
-    return { added: confirmed.filter((s) => s.chosenEditionId).length, photo: session.photoDeletedAt ? null : session.imagePath };
+    return {
+      added: toAdd.length,
+      skipped: confirmed.filter((s) => s.chosenEditionId).length - toAdd.length,
+      photo: session.photoDeletedAt ? null : session.imagePath,
+    };
   });
 }
 

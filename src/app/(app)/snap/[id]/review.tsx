@@ -55,6 +55,7 @@ export function Review({
   const { pending, error: actionError, go } = useAction();
   const [active, setActive] = useState<number | null>(null);
   const [added, setAdded] = useState<number | null>(null);
+  const [skipped, setSkipped] = useState(0);
   const counts = spines.reduce((acc, s) => ({ ...acc, [s.state]: (acc[s.state] ?? 0) + 1 }), {} as Partial<Record<State, number>>);
   const confirmed = counts.confirmed ?? 0;
   const matched = counts.matched ?? 0;
@@ -91,6 +92,11 @@ export function Review({
         {!committed && spines.length > 0 && (
           <p className="text-[15px] text-ink-2">
             {matched + confirmed} recognised{open > 0 && <>, {plural(open, "needs", "need")} a look</>}. Nothing is added until you press the button at the bottom.
+          </p>
+        )}
+        {committed && skipped > 0 && (
+          <p className="text-[15px] text-ink-2">
+            {plural(skipped, "book was", "books were")} already added from another photo, so {skipped === 1 ? "it wasn't" : "they weren't"} added twice.
           </p>
         )}
         {spines.length === 0 && <p className="text-[15px] text-ink-2">Try a closer, straighter photo with the spines filling the frame — or add the books by hand.</p>}
@@ -154,7 +160,10 @@ export function Review({
               onClick={() =>
                 go(async () => {
                   const res = await commitSnapAction(sessionId);
-                  if (res.ok) setAdded(res.data.added);
+                  if (res.ok) {
+                    setAdded(res.data.added);
+                    setSkipped(res.data.skipped);
+                  }
                   return res;
                 })
               }

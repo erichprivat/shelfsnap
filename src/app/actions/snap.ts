@@ -20,14 +20,14 @@ import {
 } from "@/domain/snap";
 import { assertCanSnap, assertDailyBudget, dailyBudgetFromEnv, snapLimitFromEnv } from "@/domain/usage";
 import { run } from "@/server/action";
-import { requireUser } from "@/server/auth";
+import { isAdmin, requireUser } from "@/server/auth";
 import { catalogueSource, discardUploads, readUpload, saveUpload, snapsAreMetered, spineReader } from "@/server/services";
 import { prepareImage } from "@/sources/spine-reader";
 
-/** Every model read checks the reader's monthly snaps and the day's budget across all readers. */
-async function assertCanRead(userId: string) {
+/** Every model read checks the reader's monthly snaps (admins have none) and the day's budget across all readers. */
+async function assertCanRead(user: { id: string; email: string }) {
   if (!snapsAreMetered) return;
-  await assertCanSnap(db, userId, snapLimitFromEnv());
+  if (!isAdmin(user.email)) await assertCanSnap(db, user.id, snapLimitFromEnv());
   await assertDailyBudget(db, dailyBudgetFromEnv());
 }
 
@@ -43,7 +43,7 @@ export async function createSnapAction(_: unknown, form: FormData) {
     const file = form.get("photo");
     if (!(file instanceof File)) throw invalid("Choose a photo of your shelf");
     validateSnapUpload(file);
-    await assertCanRead(user.id);
+    await assertCanRead(user);
     const locationId = (form.get("locationId") as string) || null;
     // Normalise once on upload: fixes rotation and makes HEIC viewable in every browser.
     const { data } = await prepareImage(new Uint8Array(await file.arrayBuffer())).catch(() => {
@@ -63,7 +63,7 @@ export async function retrySnapAction(sessionId: string) {
   return run(async () => {
     const session = await getOwnedSession(db, user.id, sessionId);
     if (session.photoDeletedAt) throw invalid(PHOTO_GONE);
-    await assertCanRead(user.id);
+    await assertCanRead(user);
     await readSnap(user.id, sessionId, session.imagePath, await readUpload(session.imagePath));
     revalidatePath(`/snap/${sessionId}`);
   });
@@ -97,11 +97,11 @@ export async function confirmAllAction(sessionId: string) {
 export async function commitSnapAction(sessionId: string) {
   const user = await requireUser();
   return run(async () => {
-    const { added, photo } = await commitSnap(db, user.id, sessionId);
+    const { added, skipped, photo } = await commitSnap(db, user.id, sessionId);
     if (photo) await discardUploads([photo]);
     revalidatePath(`/snap/${sessionId}`);
     revalidatePath("/library");
-    return { added };
+    return { added, skipped };
   });
 }
 

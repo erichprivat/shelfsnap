@@ -8,7 +8,7 @@ import { LinkButton, PageHead } from "@/components/ui";
 import { formatDate, plural } from "@/lib/labels";
 import { placeOrder, placePaths } from "@/lib/places";
 import { dailyBudgetFromEnv, snapAllowance, snapLimitFromEnv, spentToday } from "@/domain/usage";
-import { requireUser } from "@/server/auth";
+import { isAdmin, requireUser } from "@/server/auth";
 import { snapsAreMetered, spineReader } from "@/server/services";
 import { SnapForm } from "./snap-form";
 
@@ -21,7 +21,7 @@ export default async function SnapPage({ searchParams }: PageProps<"/snap">) {
     shelvesFor(db, user.id),
     db.query.snapSessions.findMany({ where: eq(snapSessions.userId, user.id), orderBy: [desc(snapSessions.createdAt)], limit: 5, with: { spines: { columns: { id: true } } } }),
   ]);
-  const allowance = snapsAreMetered ? await snapAllowance(db, user.id, snapLimitFromEnv()) : null;
+  const allowance = snapsAreMetered && !isAdmin(user.email) ? await snapAllowance(db, user.id, snapLimitFromEnv()) : null;
   const outOfSnaps = allowance?.remaining === 0;
   const budget = dailyBudgetFromEnv();
   const paused = snapsAreMetered && budget !== null && (await spentToday(db)) >= budget;
