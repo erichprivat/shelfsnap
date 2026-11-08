@@ -9,8 +9,10 @@ export const metadata: Metadata = { title: "Sign in" };
 
 export default async function SignInPage({ searchParams }: PageProps<"/sign-in">) {
   if (await getSession()) redirect("/library");
-  // Providers send failed sign-ins back here with ?error=<code>.
-  const failed = typeof (await searchParams).error === "string";
+  // Providers send failed sign-ins back here with ?error=<code>; unable_to_create_user means invite-only refused a new account.
+  const { error } = await searchParams;
+  const failed = typeof error === "string";
+  const notConnected = error === "unable_to_create_user" && signupsAreInviteOnly();
   return (
     <Bookplate>
       <p className="text-center font-serif text-sm italic text-ink-3">Ex libris</p>
@@ -20,8 +22,8 @@ export default async function SignInPage({ searchParams }: PageProps<"/sign-in">
       </p>
       {failed && (
         <p className="mt-6 border-l-2 border-accent pl-3 text-sm text-accent">
-          {signupsAreInviteOnly()
-            ? "That sign-in didn't work. Readmoth is invite-only during the beta, so use the account whose address was invited, or the email link."
+          {notConnected
+            ? "That Google account isn't connected to a Readmoth account yet. Sign in with the email link, then connect Google on your account page. New to Readmoth? It's invite-only during the beta."
             : "That sign-in didn't work. Try again, or use the email link."}
         </p>
       )}
