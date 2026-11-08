@@ -262,6 +262,8 @@ export const snapSessions = sqliteTable(
     imagePath: text("image_path").notNull(),
     status: text("status", { enum: ["processing", "ready", "failed", "committed"] }).notNull(),
     error: text("error"),
+    // Photos are only kept while there is something left to review; the file is gone once this is set.
+    photoDeletedAt: integer("photo_deleted_at", { mode: "timestamp_ms" }),
     createdAt: createdAt(),
   },
   (t) => [index("snap_sessions_user_idx").on(t.userId)],

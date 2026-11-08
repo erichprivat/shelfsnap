@@ -55,9 +55,20 @@ when `FEEDBACK_TO` is set, forwarded by email with the reader as reply-to. Local
 bun run stats
 ```
 
+## Limits and abuse guards
+
+- **Invite-only beta.** With `SIGNUPS=invite` (set in `fly.toml`), only addresses in `INVITED_EMAILS` or `ADMIN_EMAILS`
+  can create an account; existing readers always get in. Invite someone with
+  `fly secrets set INVITED_EMAILS=a@example.com,b@example.com` (it replaces the list).
+- **Snaps per reader:** `SNAP_MONTHLY_LIMIT` model reads a month. Failed reads that were billed count too.
+- **Spend per day:** once all readers together pass `SNAP_DAILY_BUDGET_USD` (UTC day), snaps pause until midnight.
+  Search and barcode always work. The Anthropic workspace cap is the last line behind this.
+- **Not a shelf:** the read also answers whether the photo shows books; if not, the snap fails and the photo is dropped.
+- **Photos** are deleted once a snap is added to the library, and after seven days if it never is (swept on boot and daily).
+
 ## Deploy (Fly.io)
 
-One machine in Stockholm with a 3 GB volume at `/data` holding the SQLite database and snap photos
+One machine in Stockholm with a 3 GB volume at `/data` holding the SQLite database and snap photos awaiting review
 (~$5/month; daily volume snapshots kept 5 days). Config is in `fly.toml`; migrations run on boot.
 
 ```bash

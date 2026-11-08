@@ -27,7 +27,7 @@ export default function PrivacyPage() {
       </header>
       <main className="mx-auto max-w-4xl px-4 pt-8 pb-20 sm:px-8">
         <div className="flex flex-col gap-3 pb-10">
-          <span className="label">Privacy · updated 2 November 2026</span>
+          <span className="label">Privacy · updated 8 November 2026</span>
           <h1 className="font-serif text-[2.6rem] leading-[1.02] tracking-[-0.01em] text-balance sm:text-[3.2rem]">
             What Readmoth keeps, and why.
           </h1>
@@ -41,7 +41,8 @@ export default function PrivacyPage() {
           <p>
             <strong>Your email address</strong>, to send sign-in links. <strong>Your library</strong>: the books you add, your rooms and
             shelves, reading status, dates, ratings, reviews, lists, and the names you type when you lend a book out.{" "}
-            <strong>Shelf photos</strong> you snap, so you can check and correct what was read. <strong>Feedback</strong> you send.
+            <strong>Shelf photos</strong> you snap, only while you check what was read: each photo is deleted as soon as you add the books, or
+            after seven days if you never finish. <strong>Feedback</strong> you send.
           </p>
           <p>
             To keep you signed in, Readmoth sets one cookie and stores the browser and IP address of each sign-in. To keep the free snap
@@ -77,7 +78,7 @@ export default function PrivacyPage() {
             and Goodreads-compatible tools can import.
           </p>
           <p>
-            <strong>Delete it.</strong> Account → Delete account removes your library, photos and sign-in details immediately. Copies in
+            <strong>Delete it.</strong> Account → Delete account removes your library, any photos still waiting for review and your sign-in details immediately. Copies in
             backups disappear within five days. Shared book records (titles, authors, covers) stay, since they belong to the catalogue,
             not to you.
           </p>

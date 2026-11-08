@@ -1,4 +1,4 @@
-# Readmoth on Fly.io (the app keeps its original internal name, shelfsnap): one small machine in Stockholm, with a volume holding the SQLite database and snap photos.
+# Readmoth on Fly.io (the app keeps its original internal name, shelfsnap): one small machine in Stockholm, with a volume holding the SQLite database and snap photos awaiting review.
 # Deploy with `fly deploy --ha=false` — SQLite on a volume means exactly one machine.
 app = "shelfsnap"
 primary_region = "arn"
@@ -10,6 +10,9 @@ primary_region = "arn"
   UPLOAD_DIR = "/data/uploads"
   SPINE_READER_MODEL = "claude-opus-5-5"
   SNAP_MONTHLY_LIMIT = "10"
+  SNAP_DAILY_BUDGET_USD = "3"
+  # Invite-only beta: new accounts need an address in the INVITED_EMAILS secret (or ADMIN_EMAILS).
+  SIGNUPS = "invite"
 
 [[mounts]]
   source = "shelfsnap_data"

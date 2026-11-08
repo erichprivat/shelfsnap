@@ -22,6 +22,13 @@
       "when": 1793604117911,
       "tag": "0002_feedback",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1794157347775,
+      "tag": "0003_snap_photo_deleted",
+      "breakpoints": true
     }
   ]
 }

@@ -7,7 +7,10 @@ import { redirect } from "next/navigation";
 import { cache } from "react";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
+import { canSignUp } from "./access";
 import { sendMagicLinkEmail } from "./email";
+
+export { canSignUp, isAdmin } from "./access";
 
 const socialProviders = {
   ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
@@ -26,6 +29,8 @@ export const auth = betterAuth({
   account: { accountLinking: { enabled: true, trustedProviders: ["google", "apple"] } },
   session: { expiresIn: 60 * 60 * 24 * 60, updateAge: 60 * 60 * 24 },
   trustedOrigins: process.env.BETTER_AUTH_URL ? [process.env.BETTER_AUTH_URL] : undefined,
+  // Backstop for every sign-in route; the magic-link form checks first so uninvited readers aren't emailed a dead link.
+  databaseHooks: { user: { create: { before: async (u) => (canSignUp(u.email) ? undefined : false) } } },
   plugins: [
     magicLink({
       expiresIn: 60 * 15,
@@ -44,10 +49,4 @@ export async function requireUser(): Promise<SessionUser> {
   const session = await getSession();
   if (!session) redirect("/sign-in");
   return session.user;
-}
-
-/** Readers listed in ADMIN_EMAILS (comma-separated) can open /admin. */
-export function isAdmin(email: string) {
-  const admins = (process.env.ADMIN_EMAILS ?? "").split(",").map((e) => e.trim().toLowerCase());
-  return admins.includes(email.toLowerCase());
 }

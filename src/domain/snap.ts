@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import type { Db, DbLike } from "@/db";
 import { copies, editions, snapSessions, snapSpines, type SpineCandidate } from "@/db/schema";
 import type { DetectedSpine, SpineReader } from "@/sources/spine-reader";
@@ -17,6 +17,10 @@ export const CONFIDENT = 0.8;
 export const MARGIN = 0.15;
 export const PLAUSIBLE = 0.45;
 const CANDIDATES_PER_SPINE = 4;
+/** Photos of snaps nobody finished reviewing are deleted after this long. */
+export const PHOTO_RETENTION_MS = 7 * 24 * 3_600_000;
+export const PHOTO_GONE = "This photo is no longer stored. Take a new one.";
+export const NOT_A_SHELF = "That doesn't look like a bookshelf. Snap the spines of your books, close enough to read the titles.";
 
 type Session = typeof snapSessions.$inferSelect;
 
@@ -204,13 +208,21 @@ export async function processSnap(
 ) {
   const session = await getOwnedSession(db, userId, sessionId);
   if (session.status !== "processing" && session.status !== "failed") return session;
+  if (session.photoDeletedAt) throw invalid(PHOTO_GONE);
 
   let detected: DetectedSpine[];
   try {
     const result = await reader.read(image);
-    detected = result.spines;
     if (result.usage) await recordUsage(db, userId, sessionId, result.usage);
+    if (!result.isShelf) {
+      // Reading the same photo again won't change the answer, so it isn't kept for a retry.
+      const failed = { status: "failed" as const, error: NOT_A_SHELF, photoDeletedAt: new Date() };
+      await db.update(snapSessions).set(failed).where(eq(snapSessions.id, sessionId));
+      return { ...session, ...failed };
+    }
+    detected = result.spines;
   } catch (e) {
+    if (e instanceof SpineReaderError && e.usage) await recordUsage(db, userId, sessionId, e.usage);
     const error = e instanceof SpineReaderError ? e.message : "Something went wrong reading the photo. Try again.";
     await db.update(snapSessions).set({ status: "failed", error }).where(eq(snapSessions.id, sessionId));
     return { ...session, status: "failed" as const, error };
@@ -280,10 +292,11 @@ export async function confirmAllMatched(db: DbLike, userId: string, sessionId: s
  * Adds confirmed spines to the library as physical copies, in shelf order,
  * after whatever is already in the location. Safe to call twice.
  */
-export async function commitSnap(db: Db, userId: string, sessionId: string) {
+/** `photo` is the stored photo this commit made obsolete, for the caller to delete. */
+export async function commitSnap(db: Db, userId: string, sessionId: string): Promise<{ added: number; photo: string | null }> {
   return db.transaction(async (tx) => {
     const session = await getOwnedSession(tx, userId, sessionId);
-    if (session.status === "committed") return { added: 0 };
+    if (session.status === "committed") return { added: 0, photo: null };
     if (session.status !== "ready") throw invalid("This photo isn't ready for review");
 
     const confirmed = await tx.query.snapSpines.findMany({
@@ -307,9 +320,16 @@ export async function commitSnap(db: Db, userId: string, sessionId: string) {
         position: pos,
       });
     }
-    await tx.update(snapSessions).set({ status: "committed" }).where(eq(snapSessions.id, sessionId));
-    return { added: confirmed.filter((s) => s.chosenEditionId).length };
+    await tx.update(snapSessions).set({ status: "committed", photoDeletedAt: session.photoDeletedAt ?? new Date() }).where(eq(snapSessions.id, sessionId));
+    return { added: confirmed.filter((s) => s.chosenEditionId).length, photo: session.photoDeletedAt ? null : session.imagePath };
   });
+}
+
+/** Marks photos of snaps older than the retention window as deleted and returns their paths, for the caller to delete. */
+export async function expireSnapPhotos(db: DbLike, now = new Date()) {
+  const stale = and(isNull(snapSessions.photoDeletedAt), lt(snapSessions.createdAt, new Date(now.getTime() - PHOTO_RETENTION_MS)));
+  const rows = await db.update(snapSessions).set({ photoDeletedAt: now }).where(stale).returning({ imagePath: snapSessions.imagePath });
+  return rows.map((r) => r.imagePath);
 }
 
 export type BookChoice = { editionId: string } | { title: string; author?: string | null };

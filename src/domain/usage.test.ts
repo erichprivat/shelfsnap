@@ -1,10 +1,22 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { modelUsage } from "@/db/schema";
-import type { SpineReader } from "@/sources/spine-reader";
+import { SpineReaderError, type SpineReader } from "@/sources/spine-reader";
 import { makeUser, testDb, type TestDb } from "@/test/db";
 import type { CatalogueSource } from "./catalogue";
 import { createSnapSession, processSnap } from "./snap";
-import { assertCanSnap, costMicros, recordUsage, snapAllowance, snapLimitFromEnv, spendSince, startOfMonthUtc } from "./usage";
+import {
+  assertCanSnap,
+  assertDailyBudget,
+  costMicros,
+  dailyBudgetFromEnv,
+  recordUsage,
+  snapAllowance,
+  snapLimitFromEnv,
+  spendSince,
+  spentToday,
+  startOfMonthUtc,
+} from "./usage";
 
 let db: TestDb;
 let me: string;
@@ -57,7 +69,7 @@ describe("snap allowance", () => {
 describe("recording from snaps", () => {
   const reader = (usage: { model: string; inputTokens: number; outputTokens: number } | null): SpineReader => ({
     name: "fake",
-    read: async () => ({ spines: [], usage }),
+    read: async () => ({ spines: [], isShelf: true, usage }),
   });
 
   it("records each model read against the session, including retries", async () => {
@@ -65,6 +77,13 @@ describe("recording from snaps", () => {
     await processSnap(db, reader(opusRead), noCatalogue, me, session.id, new Uint8Array());
     const rows = await db.query.modelUsage.findMany();
     expect(rows).toEqual([expect.objectContaining({ userId: me, sessionId: session.id, costMicros: 44056 })]);
+  });
+
+  it("counts a failed read that was still billed", async () => {
+    const failing: SpineReader = { name: "fake", read: async () => Promise.reject(new SpineReaderError("Too many books", opusRead)) };
+    const session = await createSnapSession(db, me, { imagePath: "x", locationId: null });
+    expect((await processSnap(db, failing, noCatalogue, me, session.id, new Uint8Array())).status).toBe("failed");
+    expect((await snapAllowance(db, me, 10)).used).toBe(1);
   });
 
   it("doesn't count demo or fixture reads", async () => {
@@ -92,4 +111,35 @@ it("snapLimitFromEnv defaults to 10 and accepts unlimited", () => {
   expect(snapLimitFromEnv("0")).toBe(0);
   expect(snapLimitFromEnv("Unlimited")).toBeNull();
   expect(snapLimitFromEnv("nonsense")).toBe(10);
+});
+
+describe("daily budget", () => {
+  const now = new Date("2026-11-08T12:00:00Z");
+  const at = async (userId: string, when: Date) => {
+    await recordUsage(db, userId, null, opusRead);
+    const rows = await db.query.modelUsage.findMany();
+    await db.update(modelUsage).set({ createdAt: when }).where(eq(modelUsage.id, rows.at(-1)!.id));
+  };
+
+  it("adds up today's reads across every reader, from midnight UTC", async () => {
+    const other = await makeUser(db, "Other");
+    await at(me, new Date("2026-11-08T00:00:00Z"));
+    await at(other, new Date("2026-11-08T11:59:00Z"));
+    await at(me, new Date("2026-11-07T23:59:59Z"));
+    expect(await spentToday(db, now)).toBe(2 * 44056);
+  });
+
+  it("pauses snaps for everyone once the day's budget is spent", async () => {
+    await at(me, now);
+    await expect(assertDailyBudget(db, 44057, now)).resolves.toBeUndefined();
+    await expect(assertDailyBudget(db, 44056, now)).rejects.toMatchObject({ code: "limit_reached" });
+    await expect(assertDailyBudget(db, null, now)).resolves.toBeUndefined();
+  });
+
+  it("reads the budget in dollars, defaulting to $3", () => {
+    expect(dailyBudgetFromEnv(undefined)).toBe(3_000_000);
+    expect(dailyBudgetFromEnv("0.5")).toBe(500_000);
+    expect(dailyBudgetFromEnv("unlimited")).toBeNull();
+    expect(dailyBudgetFromEnv("nonsense")).toBe(3_000_000);
+  });
 });

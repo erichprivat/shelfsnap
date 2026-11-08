@@ -37,7 +37,21 @@ const COMMITTED = {
   skipped: { label: "Not added", dot: "bg-ink-3", text: "text-ink-3" },
 };
 
-export function Review({ sessionId, status, error, place, spines }: { sessionId: string; status: string; error: string | null; place: string | null; spines: ReviewSpine[] }) {
+export function Review({
+  sessionId,
+  status,
+  error,
+  place,
+  hasPhoto,
+  spines,
+}: {
+  sessionId: string;
+  status: string;
+  error: string | null;
+  place: string | null;
+  hasPhoto: boolean;
+  spines: ReviewSpine[];
+}) {
   const { pending, error: actionError, go } = useAction();
   const [active, setActive] = useState<number | null>(null);
   const [added, setAdded] = useState<number | null>(null);
@@ -52,10 +66,12 @@ export function Review({ sessionId, status, error, place, spines }: { sessionId:
         <h1 className="font-serif text-3xl">We couldn&apos;t read that photo</h1>
         <p className="text-ink-2">{error}</p>
         <div className="flex gap-2">
-          <Button disabled={pending} onClick={() => go(() => retrySnapAction(sessionId))}>
-            {pending ? "Trying again…" : "Try again"}
-          </Button>
-          <LinkButton href="/snap" variant="line">
+          {hasPhoto && (
+            <Button disabled={pending} onClick={() => go(() => retrySnapAction(sessionId))}>
+              {pending ? "Trying again…" : "Try again"}
+            </Button>
+          )}
+          <LinkButton href="/snap" variant={hasPhoto ? "line" : undefined}>
             Take a new photo
           </LinkButton>
         </div>
@@ -82,30 +98,32 @@ export function Review({ sessionId, status, error, place, spines }: { sessionId:
       {spines.length === 0 && !committed && <MissedBook sessionId={sessionId} spines={spines} />}
 
       {spines.length > 0 && (
-        <div className="grid gap-8 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] xl:items-start">
-          <figure className="relative overflow-hidden bg-ink/90 xl:sticky xl:top-8">
-            {/* eslint-disable-next-line @next/next/no-img-element -- private, auth-checked photo */}
-            <img src={`/api/snaps/${sessionId}/photo`} alt="Your shelf" className="block h-auto w-full" />
-            {spines.map((s) =>
-              s.box ? (
-                <button
-                  key={s.id}
-                  type="button"
-                  onClick={() => {
-                    setActive(s.ordinal);
-                    document.getElementById(`spine-${s.ordinal}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-                  }}
-                  className={`absolute border transition-colors ${active === s.ordinal ? "border-paper bg-paper/20" : "border-paper/50 hover:border-paper"}`}
-                  style={{ left: `${s.box.x * 100}%`, top: `${s.box.y * 100}%`, width: `${s.box.w * 100}%`, height: `${s.box.h * 100}%` }}
-                  aria-label={`Spine ${s.ordinal + 1}`}
-                >
-                  <span className={`absolute -top-2.5 left-1/2 flex h-5 min-w-5 -translate-x-1/2 items-center justify-center rounded-full px-1 font-mono text-[10px] text-paper ${TONE[s.state].dot}`}>
-                    {s.ordinal + 1}
-                  </span>
-                </button>
-              ) : null,
-            )}
-          </figure>
+        <div className={hasPhoto ? "grid gap-8 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] xl:items-start" : "max-w-3xl"}>
+          {hasPhoto && (
+            <figure className="relative overflow-hidden bg-ink/90 xl:sticky xl:top-8">
+              {/* eslint-disable-next-line @next/next/no-img-element -- private, auth-checked photo */}
+              <img src={`/api/snaps/${sessionId}/photo`} alt="Your shelf" className="block h-auto w-full" />
+              {spines.map((s) =>
+                s.box ? (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => {
+                      setActive(s.ordinal);
+                      document.getElementById(`spine-${s.ordinal}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }}
+                    className={`absolute border transition-colors ${active === s.ordinal ? "border-paper bg-paper/20" : "border-paper/50 hover:border-paper"}`}
+                    style={{ left: `${s.box.x * 100}%`, top: `${s.box.y * 100}%`, width: `${s.box.w * 100}%`, height: `${s.box.h * 100}%` }}
+                    aria-label={`Spine ${s.ordinal + 1}`}
+                  >
+                    <span className={`absolute -top-2.5 left-1/2 flex h-5 min-w-5 -translate-x-1/2 items-center justify-center rounded-full px-1 font-mono text-[10px] text-paper ${TONE[s.state].dot}`}>
+                      {s.ordinal + 1}
+                    </span>
+                  </button>
+                ) : null,
+              )}
+            </figure>
+          )}
 
           <div className="flex flex-col gap-5">
             <ol className="flex flex-col border-t border-rule">
