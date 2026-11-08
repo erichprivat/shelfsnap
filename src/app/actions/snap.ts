@@ -13,15 +13,29 @@ import {
   confirmSpine,
   createSnapSession,
   getOwnedSession,
+  PHOTO_GONE,
   processSnap,
   rejectSpine,
   validateSnapUpload,
 } from "@/domain/snap";
-import { assertCanSnap, snapLimitFromEnv } from "@/domain/usage";
+import { assertCanSnap, assertDailyBudget, dailyBudgetFromEnv, snapLimitFromEnv } from "@/domain/usage";
 import { run } from "@/server/action";
 import { requireUser } from "@/server/auth";
-import { catalogueSource, readUpload, saveUpload, snapsAreMetered, spineReader } from "@/server/services";
+import { catalogueSource, discardUploads, readUpload, saveUpload, snapsAreMetered, spineReader } from "@/server/services";
 import { prepareImage } from "@/sources/spine-reader";
+
+/** Every model read checks the reader's monthly snaps and the day's budget across all readers. */
+async function assertCanRead(userId: string) {
+  if (!snapsAreMetered) return;
+  await assertCanSnap(db, userId, snapLimitFromEnv());
+  await assertDailyBudget(db, dailyBudgetFromEnv());
+}
+
+/** Reads the photo, then deletes it if the read decided it isn't worth keeping. */
+async function readSnap(userId: string, sessionId: string, imagePath: string, image: Uint8Array) {
+  const session = await processSnap(db, spineReader, catalogueSource, userId, sessionId, image);
+  if (session.photoDeletedAt) await discardUploads([imagePath]);
+}
 
 export async function createSnapAction(_: unknown, form: FormData) {
   const user = await requireUser();
@@ -29,7 +43,7 @@ export async function createSnapAction(_: unknown, form: FormData) {
     const file = form.get("photo");
     if (!(file instanceof File)) throw invalid("Choose a photo of your shelf");
     validateSnapUpload(file);
-    if (snapsAreMetered) await assertCanSnap(db, user.id, snapLimitFromEnv());
+    await assertCanRead(user.id);
     const locationId = (form.get("locationId") as string) || null;
     // Normalise once on upload: fixes rotation and makes HEIC viewable in every browser.
     const { data } = await prepareImage(new Uint8Array(await file.arrayBuffer())).catch(() => {
@@ -37,7 +51,7 @@ export async function createSnapAction(_: unknown, form: FormData) {
     });
     const imagePath = await saveUpload(user.id, data, "jpg");
     const session = await createSnapSession(db, user.id, { imagePath, locationId });
-    await processSnap(db, spineReader, catalogueSource, user.id, session.id, data);
+    await readSnap(user.id, session.id, imagePath, data);
     return session.id;
   });
   if (!result.ok) return result;
@@ -48,8 +62,9 @@ export async function retrySnapAction(sessionId: string) {
   const user = await requireUser();
   return run(async () => {
     const session = await getOwnedSession(db, user.id, sessionId);
-    if (snapsAreMetered) await assertCanSnap(db, user.id, snapLimitFromEnv());
-    await processSnap(db, spineReader, catalogueSource, user.id, sessionId, await readUpload(session.imagePath));
+    if (session.photoDeletedAt) throw invalid(PHOTO_GONE);
+    await assertCanRead(user.id);
+    await readSnap(user.id, sessionId, session.imagePath, await readUpload(session.imagePath));
     revalidatePath(`/snap/${sessionId}`);
   });
 }
@@ -82,10 +97,11 @@ export async function confirmAllAction(sessionId: string) {
 export async function commitSnapAction(sessionId: string) {
   const user = await requireUser();
   return run(async () => {
-    const res = await commitSnap(db, user.id, sessionId);
+    const { added, photo } = await commitSnap(db, user.id, sessionId);
+    if (photo) await discardUploads([photo]);
     revalidatePath(`/snap/${sessionId}`);
     revalidatePath("/library");
-    return res;
+    return { added };
   });
 }
 

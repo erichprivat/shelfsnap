@@ -1,0 +1,1 @@
+ALTER TABLE `snap_sessions` ADD `photo_deleted_at` integer;

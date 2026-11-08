@@ -9,9 +9,9 @@ import { deleteAccount } from "@/domain/account";
 import { submitFeedback } from "@/domain/feedback";
 import { applyImport, type ImportReport } from "@/domain/import/apply";
 import { MAX_IMPORT_BYTES, parseImportCsv } from "@/domain/import/parse";
-import { invalid } from "@/domain/errors";
+import { DomainError, invalid } from "@/domain/errors";
 import { run } from "@/server/action";
-import { auth, requireUser } from "@/server/auth";
+import { auth, canSignUp, requireUser } from "@/server/auth";
 import { sendFeedbackEmail } from "@/server/email";
 import { deleteUploads } from "@/server/services";
 import { headers } from "next/headers";
@@ -21,6 +21,9 @@ export async function sendMagicLinkAction(_: unknown, form: FormData) {
   const email = String(form.get("email") ?? "").trim().toLowerCase();
   const result = await run(async () => {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw invalid("Enter a valid email address");
+    if (!canSignUp(email) && !(await db.query.user.findFirst({ where: eq(userTable.email, email), columns: { id: true } }))) {
+      throw new DomainError("forbidden", "Readmoth is invite-only during the beta. If you were invited, use the address the invite went to.");
+    }
     await auth.api.signInMagicLink({ body: { email, callbackURL: "/library", newUserCallbackURL: "/welcome" }, headers: await headers() });
   });
   if (!result.ok) return result;

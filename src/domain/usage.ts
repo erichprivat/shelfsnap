@@ -49,6 +49,27 @@ export async function assertCanSnap(db: DbLike, userId: string, limit: number | 
   return a;
 }
 
+export function startOfDayUtc(now: Date) {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+/** What every reader together has spent on model reads since midnight UTC, in micro-dollars. */
+export async function spentToday(db: DbLike, now = new Date()) {
+  const [row] = await db
+    .select({ micros: sql<number | null>`sum(${modelUsage.costMicros})` })
+    .from(modelUsage)
+    .where(gte(modelUsage.createdAt, startOfDayUtc(now)));
+  return row?.micros ?? 0;
+}
+
+/** A ceiling across all accounts, so a burst of sign-ups can't run up the bill. `budgetMicros` null means no ceiling. */
+export async function assertDailyBudget(db: DbLike, budgetMicros: number | null, now = new Date()) {
+  if (budgetMicros === null) return;
+  if ((await spentToday(db, now)) >= budgetMicros) {
+    throw new DomainError("limit_reached", "Shelf snaps are paused for the rest of the day. Try again tomorrow — until then, add books by search or barcode.");
+  }
+}
+
 /** Monthly spend per user, most expensive first. */
 export async function spendSince(db: DbLike, since: Date) {
   return db
@@ -64,4 +85,11 @@ export function snapLimitFromEnv(raw = process.env.SNAP_MONTHLY_LIMIT): number |
   if (raw?.trim().toLowerCase() === "unlimited") return null;
   const n = Number.parseInt(raw ?? "", 10);
   return Number.isFinite(n) && n >= 0 ? n : 10;
+}
+
+/** SNAP_DAILY_BUDGET_USD: dollars across all readers per UTC day, or "unlimited". Defaults to $3. Returns micro-dollars. */
+export function dailyBudgetFromEnv(raw = process.env.SNAP_DAILY_BUDGET_USD): number | null {
+  if (raw?.trim().toLowerCase() === "unlimited") return null;
+  const n = Number.parseFloat(raw ?? "");
+  return Math.round((Number.isFinite(n) && n >= 0 ? n : 3) * 1_000_000);
 }

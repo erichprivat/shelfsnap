@@ -10,7 +10,7 @@ export type DetectedSpine = { text: string; title: string | null; author: string
 export type ModelUsage = { model: string; inputTokens: number; outputTokens: number };
 
 /** `usage` is null for readers that don't call a model (demo, fixture). */
-export type ReadResult = { spines: DetectedSpine[]; usage: ModelUsage | null };
+export type ReadResult = { spines: DetectedSpine[]; isShelf: boolean; usage: ModelUsage | null };
 
 export interface SpineReader {
   readonly name: string;
@@ -20,12 +20,21 @@ export interface SpineReader {
 export type SpineModel = "claude-opus-5-5" | "claude-sonnet-5-5" | "claude-haiku-5-5";
 export const SPINE_MODELS: readonly SpineModel[] = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
 
-export class SpineReaderError extends Error {}
+/** `usage` is set when the model was called and billed before the read failed. */
+export class SpineReaderError extends Error {
+  constructor(
+    message: string,
+    readonly usage: ModelUsage | null = null,
+  ) {
+    super(message);
+  }
+}
 
 // High-resolution vision tier: larger images gain nothing and cost more tokens.
 const MAX_EDGE = 2576;
 
 const SpineSchema = z.object({
+  isBookshelf: z.boolean().describe("True if the photo shows books on a shelf or in a stack, false for anything else"),
   spines: z.array(
     z.object({
       text: z.string().describe("Every word legible on the spine, in reading order"),
@@ -42,7 +51,8 @@ const SpineSchema = z.object({
 
 const PROMPT = `This is a photo of a bookshelf. List every book spine you can see, from left to right (top shelf first if there are several).
 For each spine give the legible text, your best reading of title and author, and its bounding box on a 0–1000 scale of the image's width and height.
-Include spines you can only partly read — use null for title/author when you genuinely can't tell. Skip objects that aren't books.`;
+Include spines you can only partly read — use null for title/author when you genuinely can't tell. Skip objects that aren't books.
+If the photo doesn't show books at all, set isBookshelf to false and return no spines.`;
 
 const isHeif = (b: Uint8Array) => {
   const brand = new TextDecoder().decode(b.subarray(4, 12));
@@ -103,17 +113,18 @@ export class ClaudeSpineReader implements SpineReader {
       if (e instanceof Anthropic.APIError) throw new SpineReaderError("The spine reader is unavailable right now. Try again shortly.");
       throw e;
     }
-    if (response.stop_reason === "refusal") throw new SpineReaderError("This photo couldn't be read. Try another shot of the shelf.");
-    if (response.stop_reason === "max_tokens") throw new SpineReaderError("That shelf has too many books for one photo. Try a closer shot.");
-    const parsed = response.parsed_output;
-    if (!parsed) throw new SpineReaderError("The spine reader returned something unexpected. Try again.");
-
-    const clamp = (n: number) => Math.min(1, Math.max(0, n));
+    // A failed read is still billed, so its usage travels with the error and counts against the limits.
     const usage: ModelUsage = {
       model: response.model,
       inputTokens: response.usage.input_tokens + (response.usage.cache_read_input_tokens ?? 0) + (response.usage.cache_creation_input_tokens ?? 0),
       outputTokens: response.usage.output_tokens,
     };
+    if (response.stop_reason === "refusal") throw new SpineReaderError("This photo couldn't be read. Try another shot of the shelf.", usage);
+    if (response.stop_reason === "max_tokens") throw new SpineReaderError("That shelf has too many books for one photo. Try a closer shot.", usage);
+    const parsed = response.parsed_output;
+    if (!parsed) throw new SpineReaderError("The spine reader returned something unexpected. Try again.", usage);
+
+    const clamp = (n: number) => Math.min(1, Math.max(0, n));
     const spines = parsed.spines.map((s) => ({
       text: s.text.trim(),
       title: s.title?.trim() || null,
@@ -128,7 +139,7 @@ export class ClaudeSpineReader implements SpineReader {
             }
           : null,
     }));
-    return { spines, usage };
+    return { spines, isShelf: parsed.isBookshelf || spines.length > 0, usage };
   }
 }
 
@@ -147,7 +158,7 @@ export class DemoSpineReader implements SpineReader {
     ];
     const w = 1 / books.length;
     const spines = books.map(([text, title, author], i) => ({ text, title, author, box: { x: i * w + w * 0.1, y: 0.08, w: w * 0.8, h: 0.84 } }));
-    return { spines, usage: null };
+    return { spines, isShelf: true, usage: null };
   }
 }
 
@@ -156,7 +167,7 @@ export class FixtureSpineReader implements SpineReader {
   readonly name = "fixture";
   constructor(private readonly path: string) {}
   async read(): Promise<ReadResult> {
-    return { spines: JSON.parse(await readFile(this.path, "utf8")) as DetectedSpine[], usage: null };
+    return { spines: JSON.parse(await readFile(this.path, "utf8")) as DetectedSpine[], isShelf: true, usage: null };
   }
 }
 

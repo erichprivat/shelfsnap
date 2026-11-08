@@ -14,6 +14,9 @@ import {
   confirmAllMatched,
   confirmSpine,
   createSnapSession,
+  expireSnapPhotos,
+  NOT_A_SHELF,
+  PHOTO_RETENTION_MS,
   processSnap,
   rejectSpine,
   scoreCandidate,
@@ -25,7 +28,7 @@ const reader = (spines: DetectedSpine[] | Error): SpineReader => ({
   name: "fake",
   read: async () => {
     if (spines instanceof Error) throw spines;
-    return { spines, usage: null };
+    return { spines, isShelf: true, usage: null };
   },
 });
 const catalogue = (records: BookRecord[] = [], opts: { down?: boolean; fieldsOnly?: BookRecord[] } = {}): CatalogueSource => ({
@@ -141,6 +144,38 @@ describe("processSnap", () => {
   });
 });
 
+describe("photo lifecycle", () => {
+  const notAShelf: SpineReader = { name: "fake", read: async () => ({ spines: [], isShelf: false, usage: null }) };
+
+  it("fails a photo that isn't a shelf and stops keeping it", async () => {
+    const session = await createSnapSession(db, me, { imagePath: "cat.jpg", locationId: null });
+    const result = await processSnap(db, notAShelf, catalogue(), me, session.id, image);
+    expect(result).toMatchObject({ status: "failed", error: NOT_A_SHELF });
+    expect(result.photoDeletedAt).toBeInstanceOf(Date);
+    await expect(processSnap(db, reader([spine("A BOOK")]), catalogue(), me, session.id, image)).rejects.toMatchObject({ code: "invalid_input" });
+  });
+
+  it("hands back the photo to delete on commit, once", async () => {
+    const { session } = await snap([spine("A BOOK")]);
+    expect(await commitSnap(db, me, session.id)).toEqual({ added: 0, photo: "x.jpg" });
+    expect((await db.query.snapSessions.findFirst({ where: eq(snapSessions.id, session.id) }))!.photoDeletedAt).toBeInstanceOf(Date);
+    expect(await commitSnap(db, me, session.id)).toEqual({ added: 0, photo: null });
+  });
+
+  it("expires photos of snaps left unreviewed past the retention window", async () => {
+    const now = new Date("2026-11-08T12:00:00Z");
+    const old = await createSnapSession(db, me, { imagePath: "old.jpg", locationId: null });
+    const fresh = await createSnapSession(db, me, { imagePath: "fresh.jpg", locationId: null });
+    const gone = await createSnapSession(db, me, { imagePath: "gone.jpg", locationId: null });
+    const longAgo = new Date(now.getTime() - PHOTO_RETENTION_MS - 1);
+    await db.update(snapSessions).set({ createdAt: longAgo }).where(eq(snapSessions.id, old.id));
+    await db.update(snapSessions).set({ createdAt: longAgo, photoDeletedAt: longAgo }).where(eq(snapSessions.id, gone.id));
+    await db.update(snapSessions).set({ createdAt: now }).where(eq(snapSessions.id, fresh.id));
+    expect(await expireSnapPhotos(db, now)).toEqual(["old.jpg"]);
+    expect(await expireSnapPhotos(db, now)).toEqual([]);
+  });
+});
+
 describe("review and commit", () => {
   it("confirms matches in one tap and adds them in shelf order after existing books", async () => {
     const shelf = await createLocation(db, me, { name: "Shelf" });
@@ -151,7 +186,7 @@ describe("review and commit", () => {
       shelf.id,
     );
     expect(await confirmAllMatched(db, me, session.id)).toBe(2);
-    expect(await commitSnap(db, me, session.id)).toEqual({ added: 2 });
+    expect(await commitSnap(db, me, session.id)).toMatchObject({ added: 2 });
     const onShelf = await db.query.copies.findMany({
       where: eq(copies.locationId, shelf.id),
       orderBy: [asc(copies.position)],
@@ -166,7 +201,7 @@ describe("review and commit", () => {
     const { session, rows } = await snap([spine("STONER JOHN WILLIAMS", "Stoner", "John Williams")], [book("Stoner", "John Williams")]);
     await confirmAllMatched(db, me, session.id);
     await commitSnap(db, me, session.id);
-    expect(await commitSnap(db, me, session.id)).toEqual({ added: 0 });
+    expect(await commitSnap(db, me, session.id)).toMatchObject({ added: 0 });
     await expect(rejectSpine(db, me, rows[0]!.id)).rejects.toMatchObject({ code: "conflict" });
     expect(await db.$count(copies)).toBe(1);
   });
@@ -178,7 +213,7 @@ describe("review and commit", () => {
     );
     await rejectSpine(db, me, rows[0]!.id);
     await confirmAllMatched(db, me, session.id);
-    expect(await commitSnap(db, me, session.id)).toEqual({ added: 1 });
+    expect(await commitSnap(db, me, session.id)).toMatchObject({ added: 1 });
   });
 
   it("lets the user pick a candidate for an ambiguous spine, and requires a pick", async () => {
@@ -195,7 +230,7 @@ describe("review and commit", () => {
     const { session, rows } = await snap([spine("STONER JOHN WILLIAMS", "Stoner", "John Williams")]);
     expect(await confirmAllMatched(db, me, session.id)).toBe(0);
     await confirmSpine(db, me, rows[0]!.id);
-    expect(await commitSnap(db, me, session.id)).toEqual({ added: 1 });
+    expect(await commitSnap(db, me, session.id)).toMatchObject({ added: 1 });
     expect(await db.$count(copies)).toBe(2);
   });
 
@@ -263,7 +298,7 @@ describe("manual correction and manual add", () => {
     const { session, rows } = await snap([spine("ACHT BERGE PAOLO COGNETTI")]);
     expect(rows[0]!.state).toBe("unmatched");
     await correctSpine(db, me, rows[0]!.id, { title: "  Acht Berge ", author: "Paolo Cognetti" });
-    expect(await commitSnap(db, me, session.id)).toEqual({ added: 1 });
+    expect(await commitSnap(db, me, session.id)).toMatchObject({ added: 1 });
     const work = await db.query.works.findFirst({ where: (t, { eq }) => eq(t.title, "Acht Berge") });
     expect(work?.authors).toEqual(["Paolo Cognetti"]);
   });
@@ -287,7 +322,7 @@ describe("manual correction and manual add", () => {
     const shelf = await createLocation(db, me, { name: "Shelf" });
     await db.update(snapSessions).set({ locationId: shelf.id }).where(eq(snapSessions.id, session.id));
     await confirmAllMatched(db, me, session.id);
-    expect(await commitSnap(db, me, session.id)).toEqual({ added: 5 });
+    expect(await commitSnap(db, me, session.id)).toMatchObject({ added: 5 });
     const onShelf = await db.query.copies.findMany({ where: eq(copies.locationId, shelf.id), orderBy: [asc(copies.position)], with: { edition: true } });
     expect(onShelf.map((c) => c.edition.title)).toEqual(["Beloved", "Stoner", "Sult", "Piranesi", "Orlando"]);
   });
@@ -295,7 +330,7 @@ describe("manual correction and manual add", () => {
   it("works on a photo where nothing was found", async () => {
     const { session } = await snap([]);
     await addMissedBook(db, me, session.id, { title: "Sult", author: "Knut Hamsun" }, null);
-    expect(await commitSnap(db, me, session.id)).toEqual({ added: 1 });
+    expect(await commitSnap(db, me, session.id)).toMatchObject({ added: 1 });
   });
 
   it("validates the position and locks after commit", async () => {
