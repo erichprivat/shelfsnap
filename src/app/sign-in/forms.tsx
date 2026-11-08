@@ -36,7 +36,7 @@ export function SocialButtons({ providers }: { providers: ("google" | "apple")[]
           onClick={async () => {
             setBusy(p);
             setError(null);
-            const res = await authClient.signIn.social({ provider: p, callbackURL: "/library", newUserCallbackURL: "/welcome" });
+            const res = await authClient.signIn.social({ provider: p, callbackURL: "/library", newUserCallbackURL: "/welcome", errorCallbackURL: "/sign-in" });
             if (res.error) {
               setError("That didn't work. Try again, or use your email instead.");
               setBusy(null);
