@@ -45,6 +45,16 @@ bun run usage 2026-11    # a given month
 Measured on a 14-book shelf: Opus 5.5 $0.044 (14/14 matched), Sonnet 5.5 $0.022 (13/14 + 1 to check),
 Haiku 5.5 $0.003 (13/14 + 2 to check, slower). Set a monthly spend limit in the Anthropic Console as a backstop.
 
+## Readers and feedback
+
+`/admin` shows each reader's first day (the spec's activation bar is 50 books), what they have done since, and
+the latest in-app feedback. Only addresses in `ADMIN_EMAILS` can open it. Feedback is stored in the database and,
+when `FEEDBACK_TO` is set, forwarded by email with the reader as reply-to. Locally:
+
+```bash
+bun run stats
+```
+
 ## Deploy (Fly.io)
 
 One machine in Stockholm with a 3 GB volume at `/data` holding the SQLite database and snap photos

@@ -38,9 +38,12 @@ export function SideNav({ email, signOut }: { email: string; signOut: () => Prom
       <span className="label mt-10 mb-2">Add books</span>
       <nav className="flex flex-col gap-0.5">{ADD.map(item)}</nav>
       <div className="mt-auto flex flex-col gap-1 border-t border-rule pt-5 text-[13px]">
-        <span className="truncate text-ink-3" title={email}>
+        <Link href="/account" className="truncate text-ink-3 hover:text-ink" title={`${email} · account settings`}>
           {email}
-        </span>
+        </Link>
+        <Link href={`/feedback?from=${encodeURIComponent(path)}`} className="text-ink-2 underline-offset-4 hover:text-ink hover:underline">
+          Send feedback
+        </Link>
         <form action={signOut}>
           <button className="text-ink-2 underline-offset-4 hover:text-ink hover:underline">Sign out</button>
         </form>
@@ -49,7 +52,7 @@ export function SideNav({ email, signOut }: { email: string; signOut: () => Prom
   );
 }
 
-export function MobileNav() {
+export function MobileNav({ email }: { email: string }) {
   const path = usePathname();
   const tab = (href: string, label: string) => (
     <Link
@@ -67,9 +70,19 @@ export function MobileNav() {
         <Link href="/library">
           <Wordmark />
         </Link>
-        <Link href="/add" className="text-sm text-ink-2">
-          Find a book
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link href="/add" className="text-sm text-ink-2">
+            Find a book
+          </Link>
+          <Link
+            href="/account"
+            aria-label="Account"
+            aria-current={isActive(path, "/account") ? "page" : undefined}
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-rule-strong font-serif text-sm text-ink-2 uppercase aria-[current=page]:border-ink aria-[current=page]:text-ink"
+          >
+            {email.slice(0, 1)}
+          </Link>
+        </div>
       </header>
       <nav className="fixed inset-x-0 bottom-0 z-30 flex h-16 items-stretch border-t border-rule bg-paper/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
         {tab("/library", "Library")}

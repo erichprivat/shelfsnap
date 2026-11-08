@@ -8,7 +8,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
     <div className="flex min-h-dvh">
       <SideNav email={user.email} signOut={signOutAction} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <MobileNav />
+        <MobileNav email={user.email} />
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 pt-6 pb-28 sm:px-8 lg:px-12 lg:pt-12 lg:pb-16">{children}</main>
       </div>
     </div>
