@@ -15,6 +15,7 @@ import {
   confirmSpine,
   createSnapSession,
   expireSnapPhotos,
+  markNewDuplicates,
   NOT_A_SHELF,
   PHOTO_RETENTION_MS,
   processSnap,
@@ -144,6 +145,47 @@ describe("processSnap", () => {
   });
 });
 
+describe("overlapping photos of one shelf", () => {
+  const lanterns = () => [spine("LANTERNS OF BERGEN INGRID SOLHEIM", "Lanterns of Bergen", "Ingrid Solheim")];
+  const records = () => [book("Lanterns of Bergen", "Ingrid Solheim")];
+  const readEarlier = (id: string) => db.update(snapSessions).set({ createdAt: new Date(Date.now() - 60_000) }).where(eq(snapSessions.id, id));
+  const stateOf = async (id: string) => (await db.query.snapSpines.findFirst({ where: eq(snapSpines.sessionId, id) }))!.state;
+
+  it("turns a match into a duplicate once another photo has added the book", async () => {
+    const first = await snap(lanterns(), records());
+    const second = await snap(lanterns(), records());
+    await confirmAllMatched(db, me, first.session.id);
+    await commitSnap(db, me, first.session.id);
+    expect(await markNewDuplicates(db, me, second.session.id)).toBe(1);
+    expect(await stateOf(second.session.id)).toBe("duplicate");
+    expect(await confirmAllMatched(db, me, second.session.id)).toBe(0);
+  });
+
+  it("skips a confirmed book that another photo added after this one was read", async () => {
+    const first = await snap(lanterns(), records());
+    const second = await snap(lanterns(), records());
+    await readEarlier(second.session.id);
+    await confirmAllMatched(db, me, first.session.id);
+    await confirmAllMatched(db, me, second.session.id);
+    await commitSnap(db, me, first.session.id);
+    expect(await commitSnap(db, me, second.session.id)).toMatchObject({ added: 0, skipped: 1 });
+    expect(await db.$count(copies)).toBe(1);
+  });
+
+  it("adds a second copy when the reader confirms a book they already owned when the photo was read", async () => {
+    const first = await snap(lanterns(), records());
+    await confirmAllMatched(db, me, first.session.id);
+    await commitSnap(db, me, first.session.id);
+    await db.update(copies).set({ createdAt: new Date(Date.now() - 120_000) });
+    const second = await snap(lanterns(), records());
+    await readEarlier(second.session.id);
+    expect(await stateOf(second.session.id)).toBe("duplicate");
+    await confirmSpine(db, me, second.rows[0]!.id);
+    expect(await commitSnap(db, me, second.session.id)).toMatchObject({ added: 1, skipped: 0 });
+    expect(await db.$count(copies)).toBe(2);
+  });
+});
+
 describe("photo lifecycle", () => {
   const notAShelf: SpineReader = { name: "fake", read: async () => ({ spines: [], isShelf: false, usage: null }) };
 
@@ -157,9 +199,9 @@ describe("photo lifecycle", () => {
 
   it("hands back the photo to delete on commit, once", async () => {
     const { session } = await snap([spine("A BOOK")]);
-    expect(await commitSnap(db, me, session.id)).toEqual({ added: 0, photo: "x.jpg" });
+    expect(await commitSnap(db, me, session.id)).toEqual({ added: 0, skipped: 0, photo: "x.jpg" });
     expect((await db.query.snapSessions.findFirst({ where: eq(snapSessions.id, session.id) }))!.photoDeletedAt).toBeInstanceOf(Date);
-    expect(await commitSnap(db, me, session.id)).toEqual({ added: 0, photo: null });
+    expect(await commitSnap(db, me, session.id)).toEqual({ added: 0, skipped: 0, photo: null });
   });
 
   it("expires photos of snaps left unreviewed past the retention window", async () => {

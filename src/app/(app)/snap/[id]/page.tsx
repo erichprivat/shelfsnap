@@ -6,7 +6,7 @@ import { db } from "@/db";
 import { editions, snapSpines } from "@/db/schema";
 import { DomainError } from "@/domain/errors";
 import { locationPath } from "@/domain/locations";
-import { getOwnedSession } from "@/domain/snap";
+import { getOwnedSession, markNewDuplicates } from "@/domain/snap";
 import { requireUser } from "@/server/auth";
 import { Review, type ReviewSpine } from "./review";
 
@@ -19,6 +19,8 @@ export default async function SnapReviewPage({ params }: PageProps<"/snap/[id]">
     if (e instanceof DomainError) notFound();
     throw e;
   });
+  // Another photo of the same shelf may have added some of these books since this one was read.
+  await markNewDuplicates(db, user.id, id);
   const spines = await db.query.snapSpines.findMany({ where: eq(snapSpines.sessionId, id), orderBy: [asc(snapSpines.ordinal)] });
   const editionIds = [...new Set(spines.flatMap((s) => [...s.candidates.map((c) => c.editionId), ...(s.chosenEditionId ? [s.chosenEditionId] : [])]))];
   const eds = editionIds.length ? await db.query.editions.findMany({ where: inArray(editions.id, editionIds), with: { work: true } }) : [];
