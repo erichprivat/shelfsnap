@@ -11,8 +11,9 @@ const STEPS = [
   ["Shelve", "Books land in the room and shelf you chose, in the order they stand. Find any copy later in seconds."],
 ];
 
-export default async function Home() {
+export default async function Home({ searchParams }: PageProps<"/">) {
   if (await getSession()) redirect("/library");
+  const deleted = (await searchParams).deleted === "1";
   return (
     <div className="grain min-h-dvh">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-4 py-6 sm:px-8">
@@ -22,6 +23,11 @@ export default async function Home() {
         </Link>
       </header>
 
+      {deleted && (
+        <p role="status" className="mx-auto max-w-6xl px-4 text-sm text-ink-2 sm:px-8">
+          Your account and everything in it has been deleted. Thanks for trying Readmoth.
+        </p>
+      )}
       <main className="mx-auto max-w-6xl px-4 sm:px-8">
         <section className="grid gap-12 pt-10 pb-20 lg:grid-cols-[1.05fr_1fr] lg:items-end lg:gap-16 lg:pt-20">
           <div className="flex flex-col gap-7">
@@ -37,7 +43,7 @@ export default async function Home() {
               <LinkButton href="/sign-in" variant="accent" size="lg">
                 Start your library
               </LinkButton>
-              <span className="text-sm text-ink-3">Free. Bring your Goodreads or StoryGraph history.</span>
+              <span className="text-sm text-ink-3">Free. Bring your Goodreads or StoryGraph history, and take it with you any time.</span>
             </div>
           </div>
           <DemoShelf />
@@ -72,7 +78,12 @@ export default async function Home() {
 
       <footer className="mx-auto flex max-w-6xl justify-between border-t border-rule px-4 py-8 text-xs text-ink-3 sm:px-8">
         <span>Readmoth</span>
-        <span>Catalogue data from Open Library</span>
+        <span className="flex gap-4">
+          <Link href="/privacy" className="hover:text-ink">
+            Privacy
+          </Link>
+          <span>Catalogue data from Open Library</span>
+        </span>
       </footer>
     </div>
   );

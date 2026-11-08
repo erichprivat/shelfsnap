@@ -12,6 +12,7 @@
     "db:migrate": "bun scripts/migrate.mjs",
     "typecheck": "next typegen && tsc --noEmit",
     "usage": "bun run src/db/usage-report.ts",
+    "stats": "bun run src/db/stats-report.ts",
     "deploy": "sh scripts/deploy.sh"
   },
   "dependencies": {

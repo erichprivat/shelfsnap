@@ -98,7 +98,7 @@ function parseGoodreadsRow(r: Raw, line: number): ImportRow | string {
   let status = statusFromShelf(exclusive);
   if (status === undefined) {
     status = shelves.map(statusFromShelf).find((s) => s !== undefined) ?? null;
-    if (status === null) warnings.push(`Unknown shelf “${exclusive}” — imported without a reading status`);
+    if (status === null && exclusive) warnings.push(`Unknown shelf “${exclusive}” — imported without a reading status`);
   }
 
   const ownedCount = int(get(r, "Owned Copies")) ?? 0;

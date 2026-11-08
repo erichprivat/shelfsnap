@@ -45,3 +45,9 @@ export async function requireUser(): Promise<SessionUser> {
   if (!session) redirect("/sign-in");
   return session.user;
 }
+
+/** Readers listed in ADMIN_EMAILS (comma-separated) can open /admin. */
+export function isAdmin(email: string) {
+  const admins = (process.env.ADMIN_EMAILS ?? "").split(",").map((e) => e.trim().toLowerCase());
+  return admins.includes(email.toLowerCase());
+}

@@ -329,6 +329,22 @@ export const modelUsage = sqliteTable(
   (t) => [index("model_usage_user_time_idx").on(t.userId, t.createdAt)],
 );
 
+// ─── Feedback (kept even if forwarding by email fails) ───────────────────────
+
+export const feedback = sqliteTable(
+  "feedback",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    message: text("message").notNull(),
+    page: text("page"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("feedback_user_time_idx").on(t.userId, t.createdAt)],
+);
+
 // ─── Relations ───────────────────────────────────────────────────────────────
 
 export const worksRelations = relations(works, ({ many }) => ({
@@ -375,3 +391,4 @@ export const snapSpinesRelations = relations(snapSpines, ({ one }) => ({
   session: one(snapSessions, { fields: [snapSpines.sessionId], references: [snapSessions.id] }),
   chosenEdition: one(editions, { fields: [snapSpines.chosenEditionId], references: [editions.id] }),
 }));
+

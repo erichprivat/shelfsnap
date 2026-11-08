@@ -10,6 +10,11 @@ export default function SignInLayout({ children }: LayoutProps<"/sign-in">) {
         </Link>
       </header>
       <main className="flex flex-1 items-start justify-center px-4 pt-6 pb-16 sm:items-center sm:pt-0">{children}</main>
+      <footer className="mx-auto w-full max-w-6xl px-4 pb-6 text-xs text-ink-3 sm:px-8">
+        <Link href="/privacy" className="hover:text-ink">
+          What Readmoth stores about you
+        </Link>
+      </footer>
     </div>
   );
 }
