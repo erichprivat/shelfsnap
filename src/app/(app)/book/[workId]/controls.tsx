@@ -18,9 +18,8 @@ import { addToListAction, createListAction, removeFromListAction } from "@/app/a
 import { Button, ErrorText, Field, Input, Select } from "@/components/ui";
 import type { CopyFormat, ReadingStatus } from "@/db/schema";
 import { useAction } from "@/lib/use-action";
-import { formatDate, STATUS_LABEL } from "@/lib/labels";
+import { formatDate, STATUS_LABEL, STATUS_ORDER } from "@/lib/labels";
 
-const ORDER: ReadingStatus[] = ["want_to_read", "reading", "paused", "read", "dnf"];
 
 export function StatusControl({ workId, status, hasReads }: { workId: string; status: ReadingStatus | null; hasReads: boolean }) {
   const { pending, error, go } = useAction();
@@ -28,7 +27,7 @@ export function StatusControl({ workId, status, hasReads }: { workId: string; st
     <div className="flex flex-col gap-2">
       <span className="label">Reading</span>
       <div role="radiogroup" aria-label="Reading status" className="flex flex-wrap gap-1.5">
-        {ORDER.map((s) => (
+        {STATUS_ORDER.map((s) => (
           <button
             key={s}
             role="radio"
