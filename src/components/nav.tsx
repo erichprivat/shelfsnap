@@ -6,6 +6,7 @@ import { Wordmark } from "./logo";
 
 const PRIMARY = [
   { href: "/library", label: "Library" },
+  { href: "/challenges", label: "Challenges" },
   { href: "/lists", label: "Lists" },
   { href: "/places", label: "Rooms & shelves" },
 ];
@@ -98,7 +99,7 @@ export function MobileNav({ email }: { email: string }) {
           </svg>
         </Link>
         {tab("/places", "Shelves")}
-        {tab("/import", "Import")}
+        {tab("/challenges", "Goals")}
       </nav>
     </>
   );

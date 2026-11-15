@@ -18,15 +18,17 @@ import { enrichLibraryBooks } from "@/server/services";
 import { deleteUploads } from "@/server/services";
 import { headers } from "next/headers";
 import { GENRES } from "@/lib/genres";
+import { safeNext } from "@/lib/next-path";
 
 export async function sendMagicLinkAction(_: unknown, form: FormData) {
   const email = String(form.get("email") ?? "").trim().toLowerCase();
+  const next = safeNext(form.get("next"));
   const result = await run(async () => {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw invalid("Enter a valid email address");
     if (!canSignUp(email) && !(await db.query.user.findFirst({ where: eq(userTable.email, email), columns: { id: true } }))) {
       throw new DomainError("forbidden", "Readmoth is invite-only during the beta. If you were invited, use the address the invite went to.");
     }
-    await auth.api.signInMagicLink({ body: { email, callbackURL: "/library", newUserCallbackURL: "/welcome" }, headers: await headers() });
+    await auth.api.signInMagicLink({ body: { email, callbackURL: next, newUserCallbackURL: next === "/library" ? "/welcome" : next }, headers: await headers() });
   });
   if (!result.ok) return result;
   redirect(`/sign-in/check-email?email=${encodeURIComponent(email)}`);

@@ -130,6 +130,11 @@ describe("cleanDescription", () => {
     const raw = "A lighthouse keeper charts the [moths](https://example.org/moths) of a drowned coast. ([source][1])\n\n[1]: https://example.org/review\n\n----------\nAlso contained in:\n - [Collected Tides](/works/OL9W)";
     expect(cleanDescription(raw)).toBe("A lighthouse keeper charts the moths of a drowned coast.");
   });
+  it("drops bold, italics and backslash line breaks", () => {
+    expect(cleanDescription("Completed late, **Lantern Harbour** is *quietly* huge.\\\nA second line about the drowned coast.")).toBe(
+      "Completed late, Lantern Harbour is quietly huge.\nA second line about the drowned coast.",
+    );
+  });
   it("treats stubs as no description", () => {
     expect(cleanDescription("Novel.")).toBeNull();
     expect(cleanDescription(undefined)).toBeNull();

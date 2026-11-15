@@ -1,5 +1,6 @@
 import type { BookRecord, Binding, CatalogueSource, EditionRecord } from "@/domain/catalogue";
 import { parseIsbn, type Isbn13 } from "@/domain/isbn";
+import { stripInlineMarkdown } from "@/lib/plain-text";
 import { jsonClient, type Sleep } from "./http";
 
 const BASE = "https://openlibrary.org";
@@ -111,6 +112,7 @@ export function cleanDescription(raw: string | null | undefined): string | null 
     .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+  text = stripInlineMarkdown(text).trim();
   return text.length >= 20 ? text : null;
 }
 

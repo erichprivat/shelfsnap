@@ -1,12 +1,15 @@
 "use client";
 
 import { useState } from "react";
+import { stripInlineMarkdown } from "@/lib/plain-text";
 
 const SOURCE = { openlibrary: "Open Library", googlebooks: "Google Books" } as const;
 
 /** The blurb, clamped until asked for; long community descriptions would push everything else down. */
-export function Description({ text, source }: { text: string; source: keyof typeof SOURCE | null }) {
+export function Description({ text: raw, source }: { text: string; source: keyof typeof SOURCE | null }) {
   const [open, setOpen] = useState(false);
+  // Descriptions saved before markdown was stripped on the way in.
+  const text = stripInlineMarkdown(raw);
   const long = text.length > 420;
   return (
     <div className="flex max-w-prose flex-col gap-2 border-t border-rule pt-5">

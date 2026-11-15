@@ -5,10 +5,11 @@ import { sendMagicLinkAction } from "@/app/actions/account";
 import { Button, ErrorText, Field, Input } from "@/components/ui";
 import { authClient } from "@/lib/auth-client";
 
-export function MagicLinkForm() {
+export function MagicLinkForm({ next = "/library" }: { next?: string }) {
   const [state, action, pending] = useActionState(sendMagicLinkAction, undefined);
   return (
     <form action={action} className="flex flex-col gap-3">
+      <input type="hidden" name="next" value={next} />
       <Field label="Email">
         <Input name="email" type="email" autoComplete="email" inputMode="email" required placeholder="you@example.com" autoFocus />
       </Field>
@@ -22,7 +23,7 @@ export function MagicLinkForm() {
 
 const LABELS = { google: "Continue with Google", apple: "Continue with Apple" } as const;
 
-export function SocialButtons({ providers }: { providers: ("google" | "apple")[] }) {
+export function SocialButtons({ providers, next = "/library" }: { providers: ("google" | "apple")[]; next?: string }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   return (
@@ -36,7 +37,7 @@ export function SocialButtons({ providers }: { providers: ("google" | "apple")[]
           onClick={async () => {
             setBusy(p);
             setError(null);
-            const res = await authClient.signIn.social({ provider: p, callbackURL: "/library", newUserCallbackURL: "/welcome", errorCallbackURL: "/sign-in" });
+            const res = await authClient.signIn.social({ provider: p, callbackURL: next, newUserCallbackURL: next === "/library" ? "/welcome" : next, errorCallbackURL: "/sign-in" });
             if (res.error) {
               setError("That didn't work. Try again, or use your email instead.");
               setBusy(null);
