@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
+import { cardSize } from "@/domain/bingo-categories";
 import { bingoBoard, membersWithProgress, visibleChallenge } from "@/domain/challenges";
 import { todayUtc } from "@/domain/dates";
 import { DomainError } from "@/domain/errors";
@@ -66,7 +67,7 @@ export default async function ChallengePage({ params }: PageProps<"/challenges/[
       </header>
 
       {board && <BingoCard challengeId={c.id} board={board} />}
-      {!member && c.kind === "bingo" && c.card && <BingoCard challengeId={c.id} board={{ card: c.card, placed: [], lines: [], candidates: [] }} readOnly />}
+      {!member && c.kind === "bingo" && c.card && <BingoCard challengeId={c.id} board={{ card: c.card, size: cardSize(c.card), placed: [], lines: [], finished: [], planned: [] }} readOnly />}
 
       <section className="grid gap-10 lg:grid-cols-[1.4fr_1fr]">
         <div className="flex flex-col gap-4">

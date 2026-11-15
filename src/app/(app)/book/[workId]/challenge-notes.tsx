@@ -19,7 +19,9 @@ export function ChallengeNotes({ workId, notes }: { workId: string; notes: BookC
               {n.title}
             </Link>
             {n.kind === "counts" && <span className="text-sm text-moss">✓ This read counts</span>}
-            {n.kind === "bingo" && n.placedOn && <span className="text-sm text-moss">✓ On your card: {n.placedOn}</span>}
+            {n.kind === "bingo" && n.placedOn && (
+              <span className={`text-sm ${n.finished ? "text-moss" : "text-ink-2"}`}>{n.finished ? `✓ On your card: ${n.placedOn}` : `Pencilled in for “${n.placedOn}”. It counts once you finish it.`}</span>
+            )}
             {n.kind === "bingo" && !n.placedOn && n.squares.length === 0 && (
               <span className="text-sm text-ink-3">
                 Doesn&apos;t fit a square by its details.{" "}
@@ -30,7 +32,7 @@ export function ChallengeNotes({ workId, notes }: { workId: string; notes: BookC
             )}
             {n.kind === "bingo" && !n.placedOn && n.squares.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-sm text-ink-3">Fits:</span>
+                <span className="text-sm text-ink-3">{n.finished ? "Fits:" : "Pencil it in for:"}</span>
                 {n.squares.map((s) => (
                   <button
                     key={s.square}
@@ -38,7 +40,7 @@ export function ChallengeNotes({ workId, notes }: { workId: string; notes: BookC
                     disabled={pending}
                     onClick={() => go(() => placeBookAction(n.challengeId, s.square, workId))}
                     className="rounded-full border border-rule-strong px-2.5 py-0.5 text-xs text-ink-2 hover:border-ink hover:text-ink disabled:opacity-60"
-                    title="Put it on this square"
+                    title={n.finished ? "Put it on this square" : "Plan it for this square; it counts once you finish it"}
                   >
                     {s.label} +
                   </button>
