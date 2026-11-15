@@ -29,6 +29,13 @@
       "when": 1794157347775,
       "tag": "0003_snap_photo_deleted",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1794765445178,
+      "tag": "0004_snap_spine_lookup",
+      "breakpoints": true
     }
   ]
 }

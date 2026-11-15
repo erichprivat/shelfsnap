@@ -16,6 +16,7 @@ import {
   PHOTO_GONE,
   processSnap,
   rejectSpine,
+  rematchSnap,
   validateSnapUpload,
 } from "@/domain/snap";
 import { assertCanSnap, assertDailyBudget, dailyBudgetFromEnv, snapLimitFromEnv } from "@/domain/usage";
@@ -118,5 +119,15 @@ export async function addMissedBookAction(sessionId: string, choice: BookChoice,
   return run(async () => {
     await addMissedBook(db, user.id, sessionId, choice, afterOrdinal);
     revalidatePath(`/snap/${sessionId}`);
+  });
+}
+
+/** Looks up unmatched spines again from their stored text. No model call, so it isn't metered. */
+export async function rematchSnapAction(sessionId: string) {
+  const user = await requireUser();
+  return run(async () => {
+    const result = await rematchSnap(db, catalogueSource, user.id, sessionId);
+    revalidatePath(`/snap/${sessionId}`);
+    return result;
   });
 }

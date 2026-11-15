@@ -17,6 +17,8 @@ export const CONFIDENT = 0.8;
 export const MARGIN = 0.15;
 export const PLAUSIBLE = 0.45;
 const CANDIDATES_PER_SPINE = 4;
+/** Spines looked up at once. Open Library throttles bursts, and each spine can take up to three searches. */
+const LOOKUP_CONCURRENCY = 2;
 /** Photos of snaps nobody finished reviewing are deleted after this long. */
 export const PHOTO_RETENTION_MS = 7 * 24 * 3_600_000;
 export const PHOTO_GONE = "This photo is no longer stored. Take a new one.";
@@ -99,8 +101,10 @@ type RemoteHit = { rec: BookRecord; score: number };
  * Asks the catalogue in up to three ways, stopping once a hit is confident:
  * free text, then title + author fields, then title alone. Free text misses
  * punctuation-heavy titles; the structured search finds them.
+ * `failed` means the catalogue couldn't be reached (after the source's own retries),
+ * so an empty result is "not looked up", not "no such book".
  */
-async function remoteCandidates(catalogue: CatalogueSource, spine: DetectedSpine): Promise<RemoteHit[]> {
+async function remoteCandidates(catalogue: CatalogueSource, spine: DetectedSpine): Promise<{ hits: RemoteHit[]; failed: boolean }> {
   const freeText = spine.title ? [spine.title, spine.author].filter(Boolean).join(" ") : spine.text;
   const attempts: (() => Promise<BookRecord[]>)[] = [() => catalogue.search(freeText, 6)];
   if (spine.title) {
@@ -112,9 +116,9 @@ async function remoteCandidates(catalogue: CatalogueSource, spine: DetectedSpine
     let recs: BookRecord[];
     try {
       recs = await attempt();
-    } catch {
-      // Catalogue outages degrade to "unmatched"; the user can search by hand.
-      break;
+    } catch (e) {
+      console.warn("Book catalogue lookup failed", e instanceof Error ? e.message : e);
+      return { hits, failed: true };
     }
     for (const rec of recs) {
       const score = scoreCandidate(spine, { ...rec, editionTitles: rec.edition?.title ? [rec.edition.title] : [] });
@@ -122,7 +126,7 @@ async function remoteCandidates(catalogue: CatalogueSource, spine: DetectedSpine
     }
     if (hits.some((h) => h.score >= CONFIDENT)) break;
   }
-  return hits;
+  return { hits, failed: false };
 }
 
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -148,16 +152,25 @@ async function localCandidates(db: Db, spine: DetectedSpine): Promise<Scored[]> 
   });
 }
 
-async function candidatesFor(db: Db, catalogue: CatalogueSource, spines: DetectedSpine[]): Promise<Scored[][]> {
+type SpineCandidates = { scored: Scored[]; catalogueFailed: boolean };
+
+async function candidatesFor(db: Db, catalogue: CatalogueSource, spines: DetectedSpine[]): Promise<SpineCandidates[]> {
+  // Once a lookup has failed after retries the catalogue is down; the remaining spines skip it instead of
+  // each waiting out their own timeouts. They're marked so "Match again" can pick them up later.
+  let unreachable = false;
   // Reads and network calls run in parallel; catalogue writes stay sequential so dedupe can't race.
-  const gathered = await mapLimit(spines, 4, async (spine) => {
-    if (tokens(spine.title ?? spine.text).length === 0) return { local: [], remote: [] };
+  const gathered = await mapLimit(spines, LOOKUP_CONCURRENCY, async (spine) => {
+    const none = { local: [] as Scored[], remote: [] as RemoteHit[], failed: false };
+    if (tokens(spine.title ?? spine.text).length === 0) return none;
     const local = await localCandidates(db, spine);
-    const confidentLocally = local.some((c) => c.score >= CONFIDENT);
-    return { local, remote: confidentLocally ? [] : await remoteCandidates(catalogue, spine) };
+    if (local.some((c) => c.score >= CONFIDENT)) return { ...none, local };
+    if (unreachable) return { ...none, local, failed: true };
+    const { hits, failed } = await remoteCandidates(catalogue, spine);
+    if (failed) unreachable = true;
+    return { local, remote: hits, failed };
   });
-  const results: Scored[][] = [];
-  for (const [i, { local, remote }] of gathered.entries()) {
+  const results: SpineCandidates[] = [];
+  for (const [i, { local, remote, failed }] of gathered.entries()) {
     const spine = spines[i]!;
     const byBook = new Map<string, Scored>();
     const keep = (c: Scored) => {
@@ -169,7 +182,7 @@ async function candidatesFor(db: Db, catalogue: CatalogueSource, spines: Detecte
       const entry = await upsertBook(db, rec);
       keep({ ...entry, score, book: bookKey(spine, rec.edition?.title ?? rec.title, rec.authors) });
     }
-    results.push([...byBook.values()].sort((a, b) => b.score - a.score).slice(0, CANDIDATES_PER_SPINE));
+    results.push({ scored: [...byBook.values()].sort((a, b) => b.score - a.score).slice(0, CANDIDATES_PER_SPINE), catalogueFailed: failed });
   }
   return results;
 }
@@ -252,27 +265,72 @@ export async function processSnap(
 
   const usable = detected.filter((d) => normalizeText(d.text).length > 0 || d.title);
   const candidates = await candidatesFor(db, catalogue, usable);
-  const results = usable.map((spine, i) => ({ spine, scored: candidates[i]! }));
+  const results = usable.map((spine, i) => ({ spine, ...candidates[i]! }));
   const owned = await ownedWorkIds(db, userId, results.flatMap((r) => r.scored.slice(0, 1).map((s) => s.workId)));
 
   await db.transaction(async (tx) => {
     await tx.delete(snapSpines).where(eq(snapSpines.sessionId, sessionId));
-    for (const [ordinal, { spine, scored }] of results.entries()) {
+    for (const [ordinal, { spine, scored, catalogueFailed }] of results.entries()) {
       const state = classify(scored, scored[0] ? owned.has(scored[0].workId) : false);
       const candidates: SpineCandidate[] = scored.map((s) => ({ editionId: s.editionId, score: Math.round(s.score * 100) / 100 }));
       await tx.insert(snapSpines).values({
         sessionId,
         ordinal,
         rawText: spine.text || [spine.title, spine.author].filter(Boolean).join(" "),
+        title: spine.title,
+        author: spine.author,
         box: spine.box,
         state,
         candidates,
         chosenEditionId: state === "matched" || state === "duplicate" ? scored[0]!.editionId : null,
+        catalogueFailed,
       });
     }
     await tx.update(snapSessions).set({ status: "ready", error: null }).where(eq(snapSessions.id, sessionId));
   });
   return getOwnedSession(db, userId, sessionId);
+}
+
+/** Spines "Match again" looks up: nothing found or the catalogue was down, and the reader hasn't decided yet. */
+const rematchable = (s: { state: SpineState; rawText: string; catalogueFailed: boolean }) =>
+  s.rawText !== "" && (s.state === "unmatched" || (s.state === "ambiguous" && s.catalogueFailed));
+
+/**
+ * Looks up the spines that found nothing again, from the text already read off them. Free: it never calls the
+ * spine reader, so it works after the photo is gone. Earlier candidates are kept, so a spine never loses a
+ * suggestion it had. Returns how many spines now have a match or candidates to choose from.
+ */
+export async function rematchSnap(db: Db, catalogue: CatalogueSource, userId: string, sessionId: string) {
+  const session = await getOwnedSession(db, userId, sessionId);
+  if (session.status === "committed") throw conflict("This shelf has already been added to your library");
+  if (session.status !== "ready") throw invalid("This photo hasn't been read yet");
+  const spines = (await db.query.snapSpines.findMany({ where: eq(snapSpines.sessionId, sessionId) })).filter(rematchable);
+  if (spines.length === 0) return { found: 0, stillFailed: 0 };
+
+  // Snaps read before title/author were stored fall back to the raw text alone.
+  const found = await candidatesFor(db, catalogue, spines.map((s) => ({ text: s.rawText, title: s.title, author: s.author, box: s.box })));
+  const merged = spines.map((s, i) => {
+    const best = new Map(s.candidates.map((c) => [c.editionId, c.score]));
+    for (const c of found[i]!.scored) best.set(c.editionId, Math.max(best.get(c.editionId) ?? 0, Math.round(c.score * 100) / 100));
+    const candidates = [...best].map(([editionId, score]) => ({ editionId, score })).sort((a, b) => b.score - a.score).slice(0, CANDIDATES_PER_SPINE);
+    return { spine: s, candidates, catalogueFailed: found[i]!.catalogueFailed };
+  });
+  const works = await workIdsOf(db, merged.flatMap((m) => m.candidates.slice(0, 1).map((c) => c.editionId)));
+  const owned = await ownedWorkIds(db, userId, [...new Set(works.values())]);
+
+  let matchedNow = 0;
+  await db.transaction(async (tx) => {
+    for (const { spine, candidates, catalogueFailed } of merged) {
+      const top = candidates[0];
+      const state = classify(candidates, top ? owned.has(works.get(top.editionId)!) : false);
+      if (state !== "unmatched") matchedNow++;
+      await tx
+        .update(snapSpines)
+        .set({ state, candidates, catalogueFailed, chosenEditionId: state === "matched" || state === "duplicate" ? top!.editionId : null })
+        .where(eq(snapSpines.id, spine.id));
+    }
+  });
+  return { found: matchedNow, stillFailed: merged.filter((m) => m.catalogueFailed).length };
 }
 
 async function getOwnedSpine(db: DbLike, userId: string, spineId: string) {

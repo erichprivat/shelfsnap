@@ -35,8 +35,51 @@ describe("OpenLibrarySource", () => {
   });
 
   it("throws on server errors so callers can report an outage", async () => {
-    const src = new OpenLibrarySource(respond({ "search.json": new Response("", { status: 503 }) }));
+    const src = new OpenLibrarySource(respond({ "search.json": new Response("", { status: 503 }) }), "test", { sleep: async () => {} });
     await expect(src.search("stoner", 5)).rejects.toThrow(/503/);
+  });
+
+  describe("retries", () => {
+    const noWait = { sleep: async () => {} };
+    const sequence = (...steps: (number | Error | object)[]) => {
+      const calls: number[] = [];
+      const impl = (async () => {
+        calls.push(calls.length);
+        const step = steps[Math.min(calls.length - 1, steps.length - 1)]!;
+        if (step instanceof Error) throw step;
+        return typeof step === "number" ? new Response("", { status: step }) : Response.json(step);
+      }) as unknown as typeof fetch;
+      return { impl, calls };
+    };
+    const hit = { docs: [{ key: "/works/OL1W", title: "Lanterns Over Brine" }] };
+
+    it("retries server errors and rate limits, then succeeds", async () => {
+      const { impl, calls } = sequence(503, 429, hit);
+      const hits = await new OpenLibrarySource(impl, "test", noWait).search("lanterns", 5);
+      expect(hits.map((h) => h.title)).toEqual(["Lanterns Over Brine"]);
+      expect(calls).toHaveLength(3);
+    });
+
+    it("retries network errors and timeouts", async () => {
+      const { impl, calls } = sequence(new TypeError("fetch failed"), new DOMException("timed out", "TimeoutError"), hit);
+      expect(await new OpenLibrarySource(impl, "test", noWait).search("lanterns", 5)).toHaveLength(1);
+      expect(calls).toHaveLength(3);
+    });
+
+    it("backs off between attempts and gives up after the last one", async () => {
+      const waits: number[] = [];
+      const { impl, calls } = sequence(502);
+      const src = new OpenLibrarySource(impl, "test", { delaysMs: [10, 30], sleep: async (ms) => void waits.push(ms) });
+      await expect(src.search("lanterns", 5)).rejects.toThrow(/502/);
+      expect(calls).toHaveLength(3);
+      expect(waits).toEqual([10, 30]);
+    });
+
+    it("doesn't retry requests that can't succeed", async () => {
+      const { impl, calls } = sequence(400);
+      await expect(new OpenLibrarySource(impl, "test", noWait).search("lanterns", 5)).rejects.toThrow(/400/);
+      expect(calls).toHaveLength(1);
+    });
   });
 
   it("maps search hits and skips docs without titles", async () => {

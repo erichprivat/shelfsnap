@@ -8,6 +8,7 @@ import {
   confirmSpineAction,
   correctSpineAction,
   rejectSpineAction,
+  rematchSnapAction,
   retrySnapAction,
 } from "@/app/actions/snap";
 import { BookLine, type BookSummary } from "@/components/book-line";
@@ -19,7 +20,16 @@ import { plural } from "@/lib/labels";
 
 type Book = BookSummary;
 type State = "matched" | "ambiguous" | "unmatched" | "duplicate" | "confirmed" | "rejected";
-export type ReviewSpine = { id: string; ordinal: number; rawText: string; state: State; box: BoundingBox | null; chosen: Book | null; candidates: Book[] };
+export type ReviewSpine = {
+  id: string;
+  ordinal: number;
+  rawText: string;
+  state: State;
+  box: BoundingBox | null;
+  catalogueFailed: boolean;
+  chosen: Book | null;
+  candidates: Book[];
+};
 
 const TONE: Record<State, { label: string; dot: string; text: string }> = {
   matched: { label: "Matched", dot: "bg-ink", text: "text-ink-2" },
@@ -29,6 +39,8 @@ const TONE: Record<State, { label: string; dot: string; text: string }> = {
   duplicate: { label: "You own this already", dot: "bg-ochre", text: "text-ochre" },
   rejected: { label: "Skipped", dot: "bg-ink-3", text: "text-ink-3" },
 };
+
+const NOT_LOOKED_UP = { label: "Not looked up yet", dot: "bg-ochre", text: "text-ochre" };
 
 const ADDED_BY_HAND = { label: "Added by hand", dot: "bg-moss", text: "text-moss" };
 
@@ -60,6 +72,11 @@ export function Review({
   const confirmed = counts.confirmed ?? 0;
   const matched = counts.matched ?? 0;
   const open = (counts.ambiguous ?? 0) + (counts.unmatched ?? 0) + (counts.duplicate ?? 0);
+  const read = spines.filter((s) => s.rawText !== "").length;
+  const notLookedUp = spines.filter(isNotLookedUp).length;
+  // Every spine we read went unlooked-up: show the outage, not a wall of unmatched spines.
+  const catalogueDown = read > 0 && notLookedUp === read;
+  const [showSpines, setShowSpines] = useState(false);
 
   if (status === "failed") {
     return (
@@ -87,9 +104,9 @@ export function Review({
       <header className="flex flex-col gap-2 border-b border-rule pb-6">
         <span className="label">{place ?? "Shelf not chosen"}</span>
         <h1 className="font-serif text-[2.2rem] leading-tight sm:text-[2.8rem]">
-          {committed ? (added !== null ? `${plural(added, "book")} added` : "Added to your library") : spines.length === 0 ? "No spines found" : `${plural(spines.length, "spine")} found`}
+          {!committed && catalogueDown ? "Couldn’t reach the book catalogue" : committed ? (added !== null ? `${plural(added, "book")} added` : "Added to your library") : spines.length === 0 ? "No spines found" : `${plural(spines.length, "spine")} found`}
         </h1>
-        {!committed && spines.length > 0 && (
+        {!committed && catalogueDown ? null : !committed && spines.length > 0 && (
           <p className="text-[15px] text-ink-2">
             {matched + confirmed} recognised{open > 0 && <>, {plural(open, "needs", "need")} a look</>}. Nothing is added until you press the button at the bottom.
           </p>
@@ -103,7 +120,16 @@ export function Review({
       </header>
       {spines.length === 0 && !committed && <MissedBook sessionId={sessionId} spines={spines} />}
 
-      {spines.length > 0 && (
+      {!committed && (notLookedUp > 0 || (counts.unmatched ?? 0) > 0) && (
+        <MatchAgain sessionId={sessionId} read={read} notLookedUp={notLookedUp} unmatched={counts.unmatched ?? 0} />
+      )}
+      {catalogueDown && !committed && !showSpines && (
+        <button className="self-start text-sm text-ink-2 underline underline-offset-4 hover:text-ink" onClick={() => setShowSpines(true)}>
+          Show the {plural(read, "spine")} we read, to find them by hand
+        </button>
+      )}
+
+      {spines.length > 0 && (!catalogueDown || showSpines || committed) && (
         <div className={hasPhoto ? "grid gap-8 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] xl:items-start" : "max-w-3xl"}>
           {hasPhoto && (
             <figure className="relative overflow-hidden bg-ink/90 xl:sticky xl:top-8">
@@ -142,7 +168,7 @@ export function Review({
         </div>
       )}
 
-      {!committed && spines.length > 0 && (
+      {!committed && spines.length > 0 && (!catalogueDown || showSpines) && (
         <div className="sticky bottom-20 z-20 -mx-4 flex flex-wrap items-center justify-between gap-3 border-t border-rule-strong bg-paper/95 px-4 py-4 backdrop-blur sm:mx-0 sm:px-0 lg:bottom-0">
           <span className="text-sm text-ink-2">
             <span className="num font-medium text-ink">{confirmed}</span> ready to add
@@ -192,6 +218,7 @@ function SpineRow({ sessionId, spine, active, locked, onFocus }: { sessionId: st
   const [searching, setSearching] = useState(false);
   const byHand = spine.rawText === "";
   let tone = TONE[spine.state];
+  if (isNotLookedUp(spine)) tone = NOT_LOOKED_UP;
   if (byHand) tone = ADDED_BY_HAND;
   if (locked) tone = spine.state === "confirmed" ? COMMITTED.added : COMMITTED.skipped;
   const pickable = spine.state === "ambiguous" || spine.state === "unmatched";
@@ -272,6 +299,54 @@ function SpineRow({ sessionId, spine, active, locked, onFocus }: { sessionId: st
         </div>
       )}
     </li>
+  );
+}
+
+const isNotLookedUp = (s: ReviewSpine) => s.catalogueFailed && (s.state === "unmatched" || s.state === "ambiguous");
+
+/**
+ * Looks the unmatched spines up again from the text already read off them. It never re-reads the photo,
+ * so it's free and still works once the photo is deleted.
+ */
+function MatchAgain({ sessionId, read, notLookedUp, unmatched }: { sessionId: string; read: number; notLookedUp: number; unmatched: number }) {
+  const { pending, error, go } = useAction();
+  const [outcome, setOutcome] = useState<string | null>(null);
+  const outage = notLookedUp > 0;
+  const run = () =>
+    go(async () => {
+      setOutcome(null);
+      const res = await rematchSnapAction(sessionId);
+      if (res.ok) {
+        const { found, stillFailed } = res.data;
+        setOutcome(
+          stillFailed > 0
+            ? "Still couldn’t reach the catalogue. Give it a few minutes and try again."
+            : found > 0
+              ? `Found suggestions for ${plural(found, "spine")}.`
+              : "Looked them up again, but found nothing new. You can search for them by hand.",
+        );
+      }
+      return res;
+    });
+  return (
+    <div className={`flex flex-col items-start gap-3 ${outage ? "border-l-2 border-ochre py-1 pl-5" : ""}`}>
+      {outage && (
+        <p className="text-[15px] text-ink-2">
+          {notLookedUp === read
+            ? `We read ${plural(read, "spine")}, but the book catalogue didn’t answer, so none of them could be looked up.`
+            : `The book catalogue didn’t answer for ${plural(notLookedUp, "spine")}.`}{" "}
+          The text is saved — matching again is free and doesn’t use up a snap.
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-3">
+        <Button variant={outage ? "accent" : "line"} size={outage ? undefined : "sm"} disabled={pending} onClick={run}>
+          {pending ? "Matching…" : "Match again"}
+        </Button>
+        {!outage && <span className="text-xs text-ink-3">Looks up the {plural(unmatched, "unrecognised spine")} again. Free.</span>}
+      </div>
+      {outcome && !pending && <p className="text-sm text-ink-2" role="status">{outcome}</p>}
+      <ErrorText>{error}</ErrorText>
+    </div>
   );
 }
 

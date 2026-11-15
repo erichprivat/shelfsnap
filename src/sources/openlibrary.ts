@@ -3,6 +3,8 @@ import { parseIsbn, type Isbn13 } from "@/domain/isbn";
 
 const BASE = "https://openlibrary.org";
 const TIMEOUT_MS = 8000;
+/** Waits before the 2nd and 3rd attempt. Open Library has frequent short hiccups (timeouts, 502/503, 429). */
+const RETRY_DELAYS_MS = [500, 1500];
 // The editions.* fields make Open Library return the edition that best matches the query.
 const SEARCH_FIELDS =
   "key,title,subtitle,author_name,first_publish_year,cover_i,cover_edition_key,subject,isbn,editions,editions.key,editions.title,editions.isbn,editions.cover_i,editions.language";
@@ -89,19 +91,50 @@ function fromDoc(doc: SearchDoc): BookRecord | null {
   };
 }
 
+/** Worth asking again: rate limiting and server-side trouble. Other 4xx won't change on a retry. */
+const retryable = (status: number) => status === 408 || status === 429 || status >= 500;
+
+class PermanentError extends Error {}
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+export type RetryOptions = { delaysMs?: readonly number[]; sleep?: (ms: number) => Promise<void> };
+
 export class OpenLibrarySource implements CatalogueSource {
+  private readonly delays: readonly number[];
+  private readonly sleep: (ms: number) => Promise<void>;
+
   constructor(
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly userAgent = process.env.OPEN_LIBRARY_USER_AGENT ?? "Readmoth/0.1 (https://github.com/erichprivat/shelfsnap)",
-  ) {}
+    retry: RetryOptions = {},
+  ) {
+    this.delays = retry.delaysMs ?? RETRY_DELAYS_MS;
+    this.sleep = retry.sleep ?? wait;
+  }
 
+  /** Retries timeouts, network errors, 429 and 5xx with a short backoff; throws once every attempt failed. */
   private async get<T>(path: string): Promise<T | null> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.getOnce<T>(path);
+      } catch (e) {
+        if (e instanceof PermanentError || attempt >= this.delays.length) throw e;
+        await this.sleep(this.delays[attempt]!);
+      }
+    }
+  }
+
+  private async getOnce<T>(path: string): Promise<T | null> {
     const res = await this.fetchImpl(`${BASE}${path}`, {
       headers: { "User-Agent": this.userAgent, Accept: "application/json" },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`Open Library responded ${res.status}`);
+    if (!res.ok) {
+      const message = `Open Library responded ${res.status}`;
+      throw retryable(res.status) ? new Error(message) : new PermanentError(message);
+    }
     return (await res.json()) as T;
   }
 
