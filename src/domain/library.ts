@@ -34,7 +34,8 @@ export type LibraryItem = {
 export type LibraryFilter = {
   q?: string;
   ownership?: "all" | "owned" | "wishlist";
-  status?: ReadingStatus | "none" | "any";
+  /** "to_read": not started, whether marked "Want to read" or not tracked at all. */
+  status?: ReadingStatus | "none" | "any" | "to_read";
   format?: CopyFormat | "any";
   locationId?: string | "unplaced" | null;
   lent?: boolean;
@@ -132,7 +133,8 @@ export function filterLibrary(items: LibraryItem[], f: LibraryFilter): LibraryIt
     if (f.ownership === "owned" && item.copies.length === 0) return false;
     if (f.ownership === "wishlist" && (item.copies.length > 0 || item.status !== "want_to_read")) return false;
     if (f.status === "none" && item.status !== null) return false;
-    if (f.status && f.status !== "any" && f.status !== "none" && item.status !== f.status) return false;
+    if (f.status === "to_read" && item.status !== null && item.status !== "want_to_read") return false;
+    if (f.status && f.status !== "any" && f.status !== "none" && f.status !== "to_read" && item.status !== f.status) return false;
     if (f.format && f.format !== "any" && !item.copies.some((c) => c.format === f.format)) return false;
     if (f.locationId === "unplaced" && !item.copies.some((c) => c.format === "physical" && c.locationId === null)) return false;
     if (f.locationId && f.locationId !== "unplaced" && !item.copies.some((c) => c.locationId === f.locationId)) return false;

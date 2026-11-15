@@ -8,6 +8,9 @@ export const STATUS_LABEL: Record<ReadingStatus, string> = {
   dnf: "Didn't finish",
 };
 
+/** The order statuses are offered in, from not started to done. */
+export const STATUS_ORDER: ReadingStatus[] = ["want_to_read", "reading", "paused", "read", "dnf"];
+
 export const FORMAT_LABEL: Record<CopyFormat, string> = { physical: "Print", ebook: "Ebook", audio: "Audiobook" };
 
 export function formatDate(iso: string | null | undefined, opts: { year?: boolean } = {}) {

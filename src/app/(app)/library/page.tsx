@@ -6,20 +6,22 @@ import { todayUtc } from "@/domain/dates";
 import { filterLibrary, libraryItems, libraryStats, shelvesFor, type LibraryFilter, type LibraryItem } from "@/domain/library";
 import { Cover } from "@/components/cover";
 import { Spine } from "@/components/spine";
+import { StatusMenu } from "@/components/status-menu";
+import { ReadingBoard } from "./board";
 import { Input, LinkButton } from "@/components/ui";
-import { FORMAT_LABEL, plural, STATUS_LABEL } from "@/lib/labels";
+import { FORMAT_LABEL, plural } from "@/lib/labels";
 import { placeOrder, placePaths } from "@/lib/places";
 import { requireUser } from "@/server/auth";
 
 export const metadata: Metadata = { title: "Library" };
 
-const VIEWS = ["shelves", "covers", "list"] as const;
+const VIEWS = ["shelves", "covers", "list", "board"] as const;
 type View = (typeof VIEWS)[number];
 
 const FILTERS: { key: string; label: string; filter: LibraryFilter }[] = [
   { key: "all", label: "Everything", filter: {} },
   { key: "owned", label: "On my shelves", filter: { ownership: "owned" } },
-  { key: "unread", label: "Owned, unread", filter: { ownership: "owned", status: "none" } },
+  { key: "want", label: "Want to read", filter: { ownership: "owned", status: "to_read" } },
   { key: "reading", label: "Reading", filter: { status: "reading" } },
   { key: "read", label: "Read", filter: { status: "read" } },
   { key: "wishlist", label: "Wishlist", filter: { ownership: "wishlist" } },
@@ -134,6 +136,21 @@ export default async function LibraryPage({ searchParams }: PageProps<"/library"
         </p>
       ) : view === "shelves" ? (
         <ShelvesView items={shown} order={placeOrder(places)} paths={paths} />
+      ) : view === "board" ? (
+        <ReadingBoard
+          // Fresh state whenever the server's statuses change.
+          key={shown.map((i) => `${i.workId}:${i.status}`).join(",")}
+          books={shown.map((i) => ({
+            workId: i.workId,
+            title: i.title,
+            author: i.authors[0] ?? null,
+            coverUrl: i.coverUrl,
+            status: i.status,
+            readThisYear: Boolean(i.lastFinishedAt?.startsWith(today.slice(0, 4))),
+          }))}
+          readEarlier={shown.filter((i) => i.status === "read" && !i.lastFinishedAt?.startsWith(today.slice(0, 4))).length}
+          readEarlierHref={href({ show: "read", view: "list" })}
+        />
       ) : view === "covers" ? (
         <CoversView items={shown} />
       ) : (
@@ -229,15 +246,15 @@ function CoversView({ items }: { items: LibraryItem[] }) {
   return (
     <ul className="grid grid-cols-3 gap-x-4 gap-y-8 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6">
       {items.map((item) => (
-        <li key={item.workId}>
+        <li key={item.workId} className="flex flex-col gap-1.5">
           <Link href={`/book/${item.workId}`} className="group flex flex-col gap-2.5">
             <Cover seed={item.workId} title={item.title} authors={item.authors} url={item.coverUrl} className="transition-transform duration-200 group-hover:-translate-y-1" />
             <span className="flex flex-col gap-0.5">
               <span className="line-clamp-2 font-serif text-[15px] leading-snug">{item.title}</span>
               <span className="truncate text-xs text-ink-3">{item.authors[0]}</span>
-              {item.status && <span className="text-[11px] text-ink-2">{STATUS_LABEL[item.status]}</span>}
             </span>
           </Link>
+          <StatusMenu key={item.status} workId={item.workId} status={item.status} className="self-start" />
         </li>
       ))}
     </ul>
@@ -270,7 +287,9 @@ function ListView({ items, paths }: { items: LibraryItem[]; paths: Map<string, s
                   </Link>
                 </td>
                 <td className="px-4 text-ink-2">{item.authors.join(", ")}</td>
-                <td className="px-4 text-ink-2">{item.status ? STATUS_LABEL[item.status] : <span className="text-ink-3">—</span>}</td>
+                <td className="px-4">
+                  <StatusMenu key={item.status} workId={item.workId} status={item.status} />
+                </td>
                 <td className="px-4 text-ink-2">{where.join("; ") || <span className="text-ink-3">—</span>}</td>
                 <td className="px-4 text-ink-3">{[...new Set(item.copies.map((c) => FORMAT_LABEL[c.format]))].join(", ") || "Not owned"}</td>
               </tr>

@@ -52,6 +52,19 @@ describe("library views", () => {
     });
   });
 
+  it("puts owned books not yet started in Want to read, marked or not", async () => {
+    const untracked = await addBook(db, "Untracked Owned", "A");
+    const marked = await addBook(db, "Marked Owned", "B");
+    const reading = await addBook(db, "Reading Owned", "C");
+    const wished = await addBook(db, "Wished Not Owned", "D");
+    for (const b of [untracked, marked, reading]) await addCopy(db, me, { editionId: b.editionId });
+    await setStatus(db, me, marked.workId, "want_to_read");
+    await setStatus(db, me, reading.workId, "reading");
+    await setStatus(db, me, wished.workId, "want_to_read");
+    const items = await libraryItems(db, me);
+    expect(filterLibrary(items, { ownership: "owned", status: "to_read" }).map((i) => i.title).sort()).toEqual(["Marked Owned", "Untracked Owned"]);
+  });
+
   it("shows the title of the edition you own, not the work's original title", async () => {
     const { editionId } = await upsertBook(db, { title: "La Peste", authors: ["Albert Camus"], openLibraryKey: "/works/OL1W", edition: { title: "The Plague", openLibraryKey: "/books/OL2M" } });
     await addCopy(db, me, { editionId });
