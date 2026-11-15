@@ -43,6 +43,13 @@
       "when": 1794771960635,
       "tag": "0005_snap_matched_at",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1794776140905,
+      "tag": "0006_challenges",
+      "breakpoints": true
     }
   ]
 }

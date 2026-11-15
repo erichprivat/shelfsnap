@@ -74,6 +74,10 @@ export default function PrivacyPage() {
             the server sends only titles, authors and ISBNs, never photos or anything about you; covers from Google load in your browser.
           </p>
           <p>Lists you choose to share can be read by anyone with the link, until you stop sharing them.</p>
+          <p>
+            In a challenge, the other readers see your first name, your progress and the books on your bingo card. Nothing else
+            from your library. Leaving a challenge removes you from it.
+          </p>
         </Part>
 
         <Part title="Your choices">

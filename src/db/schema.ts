@@ -303,6 +303,65 @@ export const snapSpines = sqliteTable(
   (t) => [uniqueIndex("snap_spines_order_idx").on(t.sessionId, t.ordinal)],
 );
 
+// ─── Goals & challenges ──────────────────────────────────────────────────────
+
+export const challengeKinds = ["books", "bingo", "shelf"] as const;
+export type ChallengeKind = (typeof challengeKinds)[number];
+
+export const challenges = sqliteTable("challenges", {
+  id: id(),
+  kind: text("kind", { enum: challengeKinds }).notNull(),
+  title: text("title").notNull(),
+  // Null for featured challenges Readmoth runs itself.
+  ownerId: text("owner_id").references(() => user.id, { onDelete: "cascade" }),
+  // Inclusive ISO dates; reads finished in this window count.
+  startsOn: text("starts_on").notNull(),
+  endsOn: text("ends_on").notNull(),
+  // Books to read, for "books" and "shelf".
+  target: integer("target"),
+  // Bingo: 25 category ids, row by row; the centre is "free".
+  card: text("card", { mode: "json" }).$type<string[]>(),
+  theme: text("theme"),
+  joinCode: text("join_code").notNull().unique(),
+  featuredSlug: text("featured_slug").unique(),
+  createdAt: createdAt(),
+});
+
+export const challengeMembers = sqliteTable(
+  "challenge_members",
+  {
+    challengeId: text("challenge_id")
+      .notNull()
+      .references(() => challenges.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    joinedAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.challengeId, t.userId] }), index("challenge_members_user_idx").on(t.userId)],
+);
+
+export const bingoSquares = sqliteTable(
+  "bingo_squares",
+  {
+    challengeId: text("challenge_id")
+      .notNull()
+      .references(() => challenges.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    square: integer("square").notNull(),
+    workId: text("work_id")
+      .notNull()
+      .references(() => works.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.challengeId, t.userId, t.square] }),
+    // One book fills one square per card.
+    uniqueIndex("bingo_squares_book_idx").on(t.challengeId, t.userId, t.workId),
+  ],
+);
+
 // ─── Import provenance (makes re-imports idempotent) ─────────────────────────
 
 export const importRecords = sqliteTable(

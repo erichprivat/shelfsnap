@@ -6,6 +6,7 @@ import { after } from "next/server";
 import { cache } from "react";
 import { db } from "@/db";
 import { copies, editions, listItems, lists, works } from "@/db/schema";
+import { bookInChallenges } from "@/domain/challenges";
 import { isOverdue } from "@/domain/copies";
 import { shelvesFor } from "@/domain/library";
 import { getStatus, readThroughsFor } from "@/domain/reading";
@@ -16,6 +17,7 @@ import { normalizeText } from "@/domain/text";
 import { requireUser } from "@/server/auth";
 import { enrichBook } from "@/server/services";
 import { AddCopy, CopyCard, ListPicker, ReadHistory, StatusControl } from "./controls";
+import { ChallengeNotes } from "./challenge-notes";
 import { Description } from "./description";
 
 const getWork = cache(async (id: string) => db.query.works.findFirst({ where: eq(works.id, id), with: { editions: true } }));
@@ -33,7 +35,7 @@ export default async function BookPage({ params }: PageProps<"/book/[workId]">) 
   // Never looked up (a snap candidate, or added while the catalogues were down): fetch details for next time.
   if (!work.enrichedAt) after(() => enrichBook(work.id));
 
-  const [myCopies, status, reads, places, myLists, memberships] = await Promise.all([
+  const [myCopies, status, reads, places, myLists, memberships, challengeNotes] = await Promise.all([
     db
       .select({ copy: copies, edition: editions })
       .from(copies)
@@ -44,6 +46,7 @@ export default async function BookPage({ params }: PageProps<"/book/[workId]">) 
     shelvesFor(db, user.id),
     db.query.lists.findMany({ where: eq(lists.userId, user.id), columns: { id: true, name: true } }),
     db.select({ listId: listItems.listId }).from(listItems).innerJoin(lists, eq(listItems.listId, lists.id)).where(and(eq(listItems.workId, workId), eq(lists.userId, user.id))),
+    bookInChallenges(db, user.id, workId),
   ]);
 
   const paths = placePaths(places);
@@ -127,6 +130,7 @@ export default async function BookPage({ params }: PageProps<"/book/[workId]">) 
         </div>
 
         <div className="flex flex-col gap-10">
+          {challengeNotes.length > 0 && <ChallengeNotes workId={work.id} notes={challengeNotes} />}
           <div className="flex flex-col gap-4">
             <h2 className="border-b border-rule pb-2 font-serif text-2xl">Reading history</h2>
             <ReadHistory workId={work.id} reads={reads.map((r) => ({ id: r.id, outcome: r.outcome, startedAt: r.startedAt, finishedAt: r.finishedAt, rating: r.rating, review: r.review }))} />

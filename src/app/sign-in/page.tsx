@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { Bookplate } from "@/components/bookplate";
+import { safeNext } from "@/lib/next-path";
 import { signupsAreInviteOnly } from "@/server/access";
 import { enabledSocialProviders, getSession } from "@/server/auth";
 import { MagicLinkForm, SocialButtons } from "./forms";
@@ -8,9 +9,11 @@ import { MagicLinkForm, SocialButtons } from "./forms";
 export const metadata: Metadata = { title: "Sign in" };
 
 export default async function SignInPage({ searchParams }: PageProps<"/sign-in">) {
-  if (await getSession()) redirect("/library");
+  // ?next= brings people back where they were headed, e.g. a challenge invite.
+  const { error, next: rawNext } = await searchParams;
+  const next = safeNext(rawNext);
+  if (await getSession()) redirect(next);
   // Providers send failed sign-ins back here with ?error=<code>; unable_to_create_user means invite-only refused a new account.
-  const { error } = await searchParams;
   const failed = typeof error === "string";
   const notConnected = error === "unable_to_create_user" && signupsAreInviteOnly();
   return (
@@ -28,7 +31,7 @@ export default async function SignInPage({ searchParams }: PageProps<"/sign-in">
         </p>
       )}
       <div className="mt-8 flex flex-col gap-5">
-        <MagicLinkForm />
+        <MagicLinkForm next={next} />
         {enabledSocialProviders.length > 0 && (
           <>
             <div className="flex items-center gap-3 text-xs text-ink-3">
@@ -36,7 +39,7 @@ export default async function SignInPage({ searchParams }: PageProps<"/sign-in">
               or
               <span className="h-px flex-1 bg-rule" />
             </div>
-            <SocialButtons providers={enabledSocialProviders} />
+            <SocialButtons providers={enabledSocialProviders} next={next} />
           </>
         )}
       </div>
