@@ -15,7 +15,7 @@ export function ProgressBar({ done, goal }: { done: number; goal: number }) {
 
 /** "3 of 24 books", or squares and lines for bingo. */
 export function progressText(kind: ChallengeCard["kind"], p: Progress) {
-  if (kind === "bingo") return `${p.done} of 24 squares${p.lines ? ` · ${plural(p.lines, "line")}` : ""}`;
+  if (kind === "bingo") return `${p.done} of ${p.goal} squares${p.lines ? ` · ${plural(p.lines, "line")}` : ""}`;
   return `${p.done} of ${plural(p.goal, "book")}`;
 }
 

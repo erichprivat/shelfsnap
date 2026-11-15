@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { createChallengeAction } from "@/app/actions/challenges";
 import { Button, ErrorText, Field, Input, Select } from "@/components/ui";
-import { category, FREE, randomCard, rerollSquare, THEMES, type ThemeId } from "@/domain/bingo-categories";
+import { CARD_SIZES, category, FREE, randomCard, rerollSquare, THEMES, type CardSize, type ThemeId } from "@/domain/bingo-categories";
+import { CARD_WIDTH, squareTint } from "../[id]/bingo-card";
 import type { ChallengeKind } from "@/db/schema";
 import { useAction } from "@/lib/use-action";
 
@@ -26,6 +27,7 @@ export function Builder({ years, initialCard }: { years: number[]; initialCard: 
   const [year, setYear] = useState(years[0]!);
   const [target, setTarget] = useState(24);
   const [themeId, setThemeId] = useState<ThemeId>("classic");
+  const [size, setSize] = useState<CardSize>(5);
   // Dealt on the server, so the first render matches; shuffles happen here.
   const [card, setCard] = useState(initialCard);
   const [title, setTitle] = useState<string | null>(null);
@@ -39,7 +41,7 @@ export function Builder({ years, initialCard }: { years: number[]; initialCard: 
   };
   const pickTheme = (id: ThemeId) => {
     setThemeId(id);
-    setCard(randomCard(id));
+    setCard(randomCard(id, size));
   };
 
   const create = () =>
@@ -92,9 +94,35 @@ export function Builder({ years, initialCard }: { years: number[]; initialCard: 
               ))}
             </div>
           </div>
+          <div className="flex flex-col gap-2">
+            <h2 className="font-serif text-2xl">How big?</h2>
+            <div role="radiogroup" aria-label="Card size" className="flex flex-wrap gap-2">
+              {CARD_SIZES.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  role="radio"
+                  aria-checked={size === n}
+                  onClick={() => {
+                    setSize(n);
+                    setCard(randomCard(themeId, n));
+                  }}
+                  className="flex items-center gap-3 border border-rule px-3 py-2 text-left transition-colors hover:border-rule-strong aria-checked:border-accent aria-checked:bg-accent/[0.06]"
+                >
+                  <MiniGrid size={n} />
+                  <span className="flex flex-col">
+                    <span className="font-serif text-lg leading-tight">
+                      {n}×{n}
+                    </span>
+                    <span className="text-xs text-ink-3">{SIZE_NOTE[n]}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-ink-3">Tap a square to swap it for another. Squares marked “you decide” are on your honour.</p>
-            <Button variant="line" size="sm" onClick={() => setCard(randomCard(themeId))}>
+            <Button variant="line" size="sm" onClick={() => setCard(randomCard(themeId, size))}>
               Shuffle card
             </Button>
           </div>
@@ -148,13 +176,27 @@ export function Builder({ years, initialCard }: { years: number[]; initialCard: 
   );
 }
 
-function BingoPreview({ card, onReroll }: { card: string[]; onReroll: (square: number) => void }) {
+const SIZE_NOTE: Record<CardSize, string> = { 3: "8 books · a quick one", 4: "16 books · no free square", 5: "24 books · the full card" };
+
+function MiniGrid({ size }: { size: number }) {
+  const free = size % 2 ? (size * size - 1) / 2 : -1;
   return (
-    <ol className="grid max-w-2xl grid-cols-5 gap-1 sm:gap-1.5">
+    <span className="grid h-8 w-8 gap-[2px]" style={{ gridTemplateColumns: `repeat(${size}, 1fr)` }} aria-hidden>
+      {Array.from({ length: size * size }, (_, i) => (
+        <span key={i} className={`rounded-[1px] ${i === free ? "bg-accent" : "bg-ink/25"}`} />
+      ))}
+    </span>
+  );
+}
+
+function BingoPreview({ card, onReroll }: { card: string[]; onReroll: (square: number) => void }) {
+  const size = Math.round(Math.sqrt(card.length));
+  return (
+    <ol className={`grid ${CARD_WIDTH[size]} gap-1.5 rounded-[6px] border border-rule-strong bg-paper-sunk p-1.5 sm:gap-2 sm:p-2.5`} style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}>
       {card.map((id, i) => {
         if (id === FREE)
           return (
-            <li key={i} className="flex aspect-square items-center justify-center bg-accent/90 p-1 text-center font-serif text-sm text-accent-ink sm:text-lg">
+            <li key={i} className="flex aspect-square items-center justify-center rounded-[4px] bg-accent p-1 text-center font-serif text-sm text-accent-ink italic sm:text-lg">
               Free
             </li>
           );
@@ -165,7 +207,8 @@ function BingoPreview({ card, onReroll }: { card: string[]; onReroll: (square: n
               type="button"
               onClick={() => onReroll(i)}
               title="Swap this square"
-              className="group relative flex aspect-square w-full flex-col items-center justify-center border border-rule bg-paper-raised p-1 text-center transition-colors hover:border-ink"
+              style={squareTint(id)}
+              className="group relative flex aspect-square w-full flex-col items-center justify-center rounded-[4px] border p-1 text-center transition-all hover:-translate-y-0.5 hover:shadow-md"
             >
               <span className="line-clamp-4 text-[9px] leading-tight text-ink sm:text-[12px]">{c?.label}</span>
               {!c?.rule && <span className="mt-0.5 hidden text-[9px] text-ink-3 sm:block">you decide</span>}

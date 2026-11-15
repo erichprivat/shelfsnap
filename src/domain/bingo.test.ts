@@ -5,7 +5,10 @@ import {
   completedLines,
   FREE,
   fittingSquares,
+  cardSize,
+  freeSquare,
   isValidCard,
+  squaresToFill,
   randomCard,
   rerollSquare,
   seededRng,
@@ -52,7 +55,7 @@ describe("bingo categories", () => {
 describe("random cards", () => {
   it("deals 24 different squares from the theme around a free centre", () => {
     for (const t of THEMES) {
-      const card = randomCard(t.id, seededRng(7));
+      const card = randomCard(t.id, 5, seededRng(7));
       expect(isValidCard(card)).toBe(true);
       expect(card[12]).toBe(FREE);
       expect(card.filter((id) => id !== FREE).every((id) => t.categories.includes(id))).toBe(true);
@@ -61,18 +64,18 @@ describe("random cards", () => {
 
   it("never puts two squares from the same group on one card", () => {
     for (let seed = 1; seed < 50; seed++) {
-      const groups = randomCard("time", seededRng(seed)).map((id) => category(id)?.group).filter(Boolean);
+      const groups = randomCard("time", 5, seededRng(seed)).map((id) => category(id)?.group).filter(Boolean);
       expect(new Set(groups).size).toBe(groups.length);
     }
   });
 
   it("is reproducible with the same seed and differs with another", () => {
-    expect(randomCard("genre", seededRng(3))).toEqual(randomCard("genre", seededRng(3)));
-    expect(randomCard("genre", seededRng(3))).not.toEqual(randomCard("genre", seededRng(4)));
+    expect(randomCard("genre", 5, seededRng(3))).toEqual(randomCard("genre", 5, seededRng(3)));
+    expect(randomCard("genre", 5, seededRng(3))).not.toEqual(randomCard("genre", 5, seededRng(4)));
   });
 
   it("rerolls one square to something new, and never the centre", () => {
-    const card = randomCard("classic", seededRng(1));
+    const card = randomCard("classic", 5, seededRng(1));
     const next = rerollSquare(card, 3, "classic", seededRng(2));
     expect(next[3]).not.toBe(card[3]);
     expect(next.filter((_, i) => i !== 3)).toEqual(card.filter((_, i) => i !== 3));
@@ -80,8 +83,22 @@ describe("random cards", () => {
     expect(rerollSquare(card, 12, "classic")).toEqual(card);
   });
 
+  it("deals 3×3, 4×4 and 5×5 cards, with a free middle only on odd sizes", () => {
+    const small = randomCard("genre", 3, seededRng(2));
+    const mid = randomCard("genre", 4, seededRng(2));
+    expect(small).toHaveLength(9);
+    expect(small[4]).toBe(FREE);
+    expect(mid).toHaveLength(16);
+    expect(mid).not.toContain(FREE);
+    expect([small, mid].every(isValidCard)).toBe(true);
+    expect(cardSize(small)).toBe(3);
+    expect(squaresToFill(small)).toBe(8);
+    expect(freeSquare(4)).toBeNull();
+    expect(isValidCard([...mid.slice(0, 15), FREE])).toBe(false);
+  });
+
   it("rejects incomplete or made-up cards", () => {
-    const card = randomCard("classic", seededRng(1));
+    const card = randomCard("classic", 5, seededRng(1));
     expect(isValidCard(card.slice(0, 24))).toBe(false);
     expect(isValidCard(card.map((id, i) => (i === 0 ? "made-up" : id)))).toBe(false);
     expect(isValidCard(card.map((id, i) => (i === 1 ? card[0] : id)))).toBe(false);
@@ -94,10 +111,13 @@ describe("lines and fits", () => {
     expect(completedLines(new Set([10, 11, 13, 14]))).toEqual([[10, 11, 12, 13, 14]]);
     expect(completedLines(new Set([0, 6, 18, 24]))).toEqual([[0, 6, 12, 18, 24]]);
     expect(completedLines(new Set([0, 1, 2, 3]))).toEqual([]);
+    expect(completedLines(new Set([0, 8]), 3)).toEqual([[0, 4, 8]]);
+    expect(completedLines(new Set([3, 6, 9, 12]), 4)).toEqual([[3, 6, 9, 12]]);
+    expect(completedLines(new Set([5, 6, 7]), 4)).toEqual([]);
   });
 
   it("lists the squares a book fits by rule", () => {
-    const card = randomCard("size", seededRng(5));
+    const card = randomCard("size", 5, seededRng(5));
     const at = card.indexOf("600-pages");
     if (at >= 0) expect(fittingSquares(card, facts({ pages: 700 }))).toContain(at);
     expect(fittingSquares(card, facts({ pages: null, title: "" , year: null }))).not.toContain(12);

@@ -277,7 +277,24 @@ export function seededRng(seed: number): Rng {
   };
 }
 
-const CENTRE = 12;
+export const CARD_SIZES = [3, 4, 5] as const;
+export type CardSize = (typeof CARD_SIZES)[number];
+
+/** Rows (and columns) of a card, from how many squares it has. */
+export function cardSize(card: readonly string[]): CardSize {
+  const n = Math.round(Math.sqrt(card.length));
+  return (CARD_SIZES as readonly number[]).includes(n) && n * n === card.length ? (n as CardSize) : 5;
+}
+
+/** Odd cards have a free space in the middle; a 4×4 card has none. */
+export function freeSquare(size: number): number | null {
+  return size % 2 === 1 ? (size * size - 1) / 2 : null;
+}
+
+/** Squares that need a book. */
+export function squaresToFill(card: readonly string[]) {
+  return card.filter((id) => id !== FREE).length;
+}
 
 function pickFrom(pool: string[], taken: string[], rng: Rng): string | null {
   const usedGroups = new Set(taken.map((id) => category(id)?.group).filter(Boolean));
@@ -286,14 +303,15 @@ function pickFrom(pool: string[], taken: string[], rng: Rng): string | null {
   return options[Math.floor(rng() * options.length)]!;
 }
 
-/** 24 different squares from the theme, no two from the same group, free space in the middle. */
-export function randomCard(themeId: ThemeId, rng: Rng = Math.random): string[] {
+/** Different squares from the theme, no two from the same group, with a free middle on odd sizes. */
+export function randomCard(themeId: ThemeId, size: CardSize = 5, rng: Rng = Math.random): string[] {
   const pool = theme(themeId).categories;
   // Top up from everything else if a theme is ever smaller than a card.
   const fallback = CATEGORIES.map((c) => c.id);
+  const free = freeSquare(size);
   const card: string[] = [];
-  for (let i = 0; i < 25; i++) {
-    if (i === CENTRE) {
+  for (let i = 0; i < size * size; i++) {
+    if (i === free) {
       card.push(FREE);
       continue;
     }
@@ -306,33 +324,44 @@ export function randomCard(themeId: ThemeId, rng: Rng = Math.random): string[] {
 
 /** Swaps one square for another from the same theme that isn't on the card yet. */
 export function rerollSquare(card: string[], square: number, themeId: ThemeId, rng: Rng = Math.random): string[] {
-  if (square === CENTRE || square < 0 || square > 24) return card;
+  if (card[square] === undefined || card[square] === FREE) return card;
   const others = card.filter((_, i) => i !== square);
   const next = pickFrom(theme(themeId).categories, others, rng) ?? card[square]!;
   return card.map((id, i) => (i === square ? next : id));
 }
 
-/** A card is 25 known category ids with the free space in the middle. */
+/** A card is 9, 16 or 25 known, different category ids, with the free space in the middle of odd sizes. */
 export function isValidCard(card: unknown): card is string[] {
+  if (!Array.isArray(card) || !card.every((id) => typeof id === "string")) return false;
+  const size = Math.round(Math.sqrt(card.length));
+  if (!(CARD_SIZES as readonly number[]).includes(size) || size * size !== card.length) return false;
+  const free = freeSquare(size);
   return (
-    Array.isArray(card) &&
-    card.length === 25 &&
-    card[CENTRE] === FREE &&
-    card.every((id, i) => (i === CENTRE ? true : typeof id === "string" && BY_ID.has(id))) &&
-    new Set(card).size === 25
+    card.every((id, i) => (i === free ? id === FREE : BY_ID.has(id))) &&
+    new Set(card).size === card.length
   );
 }
 
-const LINES: number[][] = [
-  ...[0, 1, 2, 3, 4].map((r) => [0, 1, 2, 3, 4].map((c) => r * 5 + c)),
-  ...[0, 1, 2, 3, 4].map((c) => [0, 1, 2, 3, 4].map((r) => r * 5 + c)),
-  [0, 6, 12, 18, 24],
-  [4, 8, 12, 16, 20],
-];
+/** Rows, columns and both diagonals of a square card. */
+export function cardLines(size: number): number[][] {
+  const idx = [...Array(size).keys()];
+  return [
+    ...idx.map((r) => idx.map((c) => r * size + c)),
+    ...idx.map((c) => idx.map((r) => r * size + c)),
+    idx.map((i) => i * size + i),
+    idx.map((i) => i * size + (size - 1 - i)),
+  ];
+}
 
-/** Complete rows, columns and diagonals, given the filled squares (the free centre always counts). */
-export function completedLines(filled: Set<number>): number[][] {
-  return LINES.filter((line) => line.every((i) => i === CENTRE || filled.has(i)));
+/** Complete lines, given the filled squares (a free middle always counts). */
+export function completedLines(filled: Set<number>, size: number = 5): number[][] {
+  const free = freeSquare(size);
+  return cardLines(size).filter((line) => line.every((i) => i === free || filled.has(i)));
+}
+
+/** The theme a square's colour comes from: its own theme, not Classic, which borrows from all of them. */
+export function categoryTheme(id: string): ThemeId | null {
+  return THEMES.find((t) => t.id !== "classic" && t.categories.includes(id))?.id ?? null;
 }
 
 /** Squares on the card this book could fill, by rule. Squares without a rule are the reader's call. */

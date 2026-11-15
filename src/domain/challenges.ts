@@ -6,6 +6,7 @@ import {
   challenges,
   copies,
   editions,
+  readingStatus,
   readThroughs,
   user,
   works,
@@ -13,7 +14,10 @@ import {
 } from "@/db/schema";
 import {
   category,
+  cardSize,
   completedLines,
+  freeSquare,
+  squaresToFill,
   fittingSquares,
   isValidCard,
   randomCard,
@@ -29,7 +33,6 @@ export type Challenge = typeof challenges.$inferSelect;
 
 const MAX_TITLE = 80;
 const MAX_TARGET = 1000;
-const CENTRE = 12;
 
 // ─── Creating, joining, leaving ──────────────────────────────────────────────
 
@@ -176,7 +179,7 @@ const startMs = (iso: string) => Date.parse(`${iso}T00:00:00Z`);
 
 export type Progress = {
   done: number;
-  /** Books for "books"/"shelf"; 24 squares for bingo. */
+  /** Books for "books"/"shelf"; squares to fill for bingo. */
   goal: number;
   /** Bingo only: complete rows, columns and diagonals. */
   lines: number;
@@ -200,7 +203,7 @@ async function progressOf(db: DbLike, c: Challenge, userIds: string[]): Promise<
     for (const id of userIds) {
       const mine = finished.get(id) ?? new Map();
       const filled = new Set(squares.filter((s) => s.userId === id && mine.has(s.workId)).map((s) => s.square));
-      out.set(id, { done: filled.size, goal: 24, lines: completedLines(filled).length });
+      out.set(id, { done: filled.size, goal: squaresToFill(c.card ?? []), lines: completedLines(filled, cardSize(c.card ?? [])).length });
     }
     return out;
   }
@@ -271,82 +274,128 @@ export async function featuredFor(db: DbLike, userId: string, today: string = to
 
 // ─── Bingo ───────────────────────────────────────────────────────────────────
 
+/**
+ * A book on a square. `counts` once the reader finishes it inside the challenge window;
+ * until then it's pencilled in.
+ */
 export type PlacedSquare = { square: number; workId: string; title: string; author: string | null; coverUrl: string | null; counts: boolean };
 
-/** Facts about the works a reader finished in the window, for matching them to squares. */
-async function factsFor(db: DbLike, userId: string, c: Challenge, workIds?: string[]) {
-  const finished = (await finishedIn(db, [userId], c.startsOn, c.endsOn)).get(userId) ?? new Map<string, string>();
-  const ids = (workIds ?? [...finished.keys()]).filter((id) => finished.has(id));
+type BookInfo = { workId: string; title: string; author: string | null; coverUrl: string | null; facts: BookFacts; finished: boolean };
+
+/**
+ * What a reader's books look like to the bingo rules. Unfinished books are judged as if
+ * finished today, so a planned book can be matched to squares before it's read.
+ */
+async function booksFor(db: DbLike, userId: string, c: Challenge, workIds: string[], today: string): Promise<BookInfo[]> {
+  const ids = [...new Set(workIds)];
   if (ids.length === 0) return [];
-  const [ws, owned] = await Promise.all([
+  const finished = (await finishedIn(db, [userId], c.startsOn, c.endsOn)).get(userId) ?? new Map<string, string>();
+  const [ws, owned, mine] = await Promise.all([
     db.query.works.findMany({ where: inArray(works.id, ids), with: { editions: true } }),
     ownedSince(db, [userId], ids),
+    db
+      .select({ workId: editions.workId, edition: editions })
+      .from(copies)
+      .innerJoin(editions, eq(copies.editionId, editions.id))
+      .where(and(eq(copies.userId, userId), inArray(editions.workId, ids))),
   ]);
-  const mine = await db
-    .select({ workId: editions.workId, edition: editions })
-    .from(copies)
-    .innerJoin(editions, eq(copies.editionId, editions.id))
-    .where(and(eq(copies.userId, userId), inArray(editions.workId, ids)));
   return ws.map((w) => {
     const edition = mine.find((m) => m.workId === w.id)?.edition ?? w.editions.find((e) => e.pageCount) ?? w.editions[0];
-    const facts: BookFacts = {
+    const finishedOn = finished.get(w.id);
+    return {
+      workId: w.id,
       title: edition?.title || w.title,
-      pages: edition?.pageCount ?? w.editions.find((e) => e.pageCount)?.pageCount ?? null,
-      year: w.firstPublishYear,
-      subjects: w.subjects,
-      language: edition?.language ?? null,
-      ownedSince: owned.get(`${userId}:${w.id}`) ?? null,
-      finishedOn: finished.get(w.id)!,
+      author: w.authors[0] ?? null,
+      coverUrl: edition?.coverUrl ?? w.editions.find((e) => e.coverUrl)?.coverUrl ?? null,
+      finished: Boolean(finishedOn),
+      facts: {
+        title: edition?.title || w.title,
+        pages: edition?.pageCount ?? w.editions.find((e) => e.pageCount)?.pageCount ?? null,
+        year: w.firstPublishYear,
+        subjects: w.subjects,
+        language: edition?.language ?? null,
+        ownedSince: owned.get(`${userId}:${w.id}`) ?? null,
+        finishedOn: finishedOn ?? today,
+      },
     };
-    const coverUrl = edition?.coverUrl ?? w.editions.find((e) => e.coverUrl)?.coverUrl ?? null;
-    return { workId: w.id, author: w.authors[0] ?? null, coverUrl, facts };
   });
 }
+
+export type BingoCandidate = { workId: string; title: string; author: string | null; coverUrl: string | null; fits: number[] };
 
 export type BingoBoard = {
   card: string[];
+  size: number;
   placed: PlacedSquare[];
   lines: number[][];
-  /** Books finished in the window and not on the card yet, with the empty squares each fits by rule. */
-  candidates: { workId: string; title: string; author: string | null; coverUrl: string | null; fits: number[] }[];
+  /** Finished in the window and not on the card yet: these count as soon as they're placed. */
+  finished: BingoCandidate[];
+  /** In the reader's library but not finished in the window: can be pencilled in. */
+  planned: BingoCandidate[];
 };
 
-export async function bingoBoard(db: DbLike, userId: string, c: Challenge): Promise<BingoBoard> {
+/** Reading now first, then what's next on the pile, then the rest of the library. */
+const PLAN_ORDER: Record<string, number> = { reading: 0, paused: 1, want_to_read: 2 };
+
+export async function bingoBoard(db: DbLike, userId: string, c: Challenge, today: string = todayUtc()): Promise<BingoBoard> {
   if (c.kind !== "bingo" || !c.card) throw invalid("That isn't a bingo challenge");
-  const [squares, facts] = await Promise.all([squaresFor(db, c.id, [userId]), factsFor(db, userId, c)]);
-  const byWork = new Map(facts.map((f) => [f.workId, f]));
-  const placedWorks = squares.filter((s) => !byWork.has(s.workId)).map((s) => s.workId);
-  const extra = placedWorks.length ? await db.query.works.findMany({ where: inArray(works.id, placedWorks), with: { editions: true } }) : [];
-  const placed: PlacedSquare[] = squares.map((s) => {
-    const f = byWork.get(s.workId);
-    const w = extra.find((x) => x.id === s.workId);
-    return {
-      square: s.square,
-      workId: s.workId,
-      title: f?.facts.title ?? w?.title ?? "A book",
-      author: f?.author ?? w?.authors[0] ?? null,
-      coverUrl: f?.coverUrl ?? w?.editions.find((e) => e.coverUrl)?.coverUrl ?? null,
-      // A book whose read was later moved out of the window no longer counts.
-      counts: Boolean(f),
-    };
+  const card = c.card;
+  const size = cardSize(card);
+  const squares = await squaresFor(db, c.id, [userId]);
+  const finishedIds = [...((await finishedIn(db, [userId], c.startsOn, c.endsOn)).get(userId)?.keys() ?? [])];
+
+  // The library, for planning: owned copies and tracked books, minus what was read in the window.
+  const [ownedRows, tracked] = await Promise.all([
+    db.selectDistinct({ workId: editions.workId }).from(copies).innerJoin(editions, eq(copies.editionId, editions.id)).where(eq(copies.userId, userId)),
+    db.select({ workId: readingStatus.workId, status: readingStatus.status }).from(readingStatus).where(eq(readingStatus.userId, userId)),
+  ]);
+  const statusOf = new Map(tracked.map((t) => [t.workId, t.status]));
+  const finishedSet = new Set(finishedIds);
+  const libraryIds = [...new Set([...ownedRows.map((r) => r.workId), ...tracked.map((t) => t.workId)])].filter(
+    (id) => !finishedSet.has(id) && statusOf.get(id) !== "read" && statusOf.get(id) !== "dnf",
+  );
+
+  const books = await booksFor(db, userId, c, [...finishedIds, ...libraryIds, ...squares.map((s) => s.workId)], today);
+  const byWork = new Map(books.map((b) => [b.workId, b]));
+  const placed: PlacedSquare[] = squares.flatMap((s) => {
+    const b = byWork.get(s.workId);
+    return b ? [{ square: s.square, workId: s.workId, title: b.title, author: b.author, coverUrl: b.coverUrl, counts: b.finished }] : [];
   });
   const taken = new Set(squares.map((s) => s.square));
   const onCard = new Set(squares.map((s) => s.workId));
-  const candidates = facts
-    .filter((f) => !onCard.has(f.workId))
-    .map((f) => ({ workId: f.workId, title: f.facts.title, author: f.author, coverUrl: f.coverUrl, fits: fittingSquares(c.card!, f.facts).filter((i) => !taken.has(i)) }))
+  const candidate = (b: BookInfo): BingoCandidate => ({
+    workId: b.workId,
+    title: b.title,
+    author: b.author,
+    coverUrl: b.coverUrl,
+    fits: fittingSquares(card, b.facts).filter((i) => !taken.has(i)),
+  });
+  const finished = finishedIds
+    .flatMap((id) => (byWork.has(id) && !onCard.has(id) ? [candidate(byWork.get(id)!)] : []))
     .sort((a, b) => b.fits.length - a.fits.length || a.title.localeCompare(b.title));
+  const planned = libraryIds
+    .flatMap((id) => (byWork.has(id) && !onCard.has(id) ? [candidate(byWork.get(id)!)] : []))
+    .sort(
+      (a, b) =>
+        (PLAN_ORDER[statusOf.get(a.workId) ?? ""] ?? 3) - (PLAN_ORDER[statusOf.get(b.workId) ?? ""] ?? 3) ||
+        b.fits.length - a.fits.length ||
+        a.title.localeCompare(b.title),
+    );
   const filled = new Set(placed.filter((p) => p.counts).map((p) => p.square));
-  return { card: c.card, placed, lines: completedLines(filled), candidates };
+  return { card, size, placed, lines: completedLines(filled, size), finished, planned };
 }
 
+/**
+ * Puts a book on a square. Any book will do: one finished in the window counts straight away,
+ * anything else is pencilled in until it's finished.
+ */
 export async function placeBook(db: DbLike, userId: string, challengeId: string, square: number, workId: string) {
   const { challenge: c, member } = await visibleChallenge(db, userId, challengeId);
   if (!member) throw invalid("Join the challenge first");
   if (c.kind !== "bingo" || !c.card) throw invalid("That isn't a bingo challenge");
-  if (!Number.isInteger(square) || square < 0 || square > 24 || square === CENTRE) throw invalid("Pick a square on the card");
-  const [facts] = await factsFor(db, userId, c, [workId]);
-  if (!facts) throw invalid("Only books you finished during the challenge can go on the card");
+  if (!Number.isInteger(square) || c.card[square] === undefined || square === freeSquare(cardSize(c.card))) throw invalid("Pick a square on the card");
+  const work = await db.query.works.findFirst({ where: eq(works.id, workId), columns: { id: true } });
+  if (!work) throw notFound("Book");
   const elsewhere = await db.query.bingoSquares.findFirst({
     where: and(eq(bingoSquares.challengeId, c.id), eq(bingoSquares.userId, userId), eq(bingoSquares.workId, workId)),
   });
@@ -363,11 +412,19 @@ export async function clearSquare(db: DbLike, userId: string, challengeId: strin
 
 export type BookChallengeNote =
   | { kind: "counts"; challengeId: string; title: string }
-  | { kind: "bingo"; challengeId: string; title: string; squares: { square: number; label: string }[]; placedOn: string | null };
+  | {
+      kind: "bingo";
+      challengeId: string;
+      title: string;
+      /** Finished in the window: placing it counts. Otherwise it would be pencilled in. */
+      finished: boolean;
+      squares: { square: number; label: string }[];
+      placedOn: string | null;
+    };
 
 /**
- * For the book page: the reader's active challenges this book counts toward,
- * and bingo squares it could fill. Nothing for a book not finished in a challenge's window.
+ * For the book page: the reader's running challenges this book counts toward, and bingo squares it
+ * could fill, or be pencilled in for if it isn't read yet.
  */
 export async function bookInChallenges(db: DbLike, userId: string, workId: string, today: string = todayUtc()): Promise<BookChallengeNote[]> {
   const mine = await db
@@ -377,21 +434,24 @@ export async function bookInChallenges(db: DbLike, userId: string, workId: strin
     .where(and(eq(challengeMembers.userId, userId), gte(challenges.endsOn, today)));
   const notes: BookChallengeNote[] = [];
   for (const { c } of mine) {
-    const [facts] = await factsFor(db, userId, c, [workId]);
-    if (!facts) continue;
-    if (c.kind === "books") notes.push({ kind: "counts", challengeId: c.id, title: c.title });
-    if (c.kind === "shelf" && facts.facts.ownedSince !== null && facts.facts.ownedSince < startMs(c.startsOn)) {
+    const [book] = await booksFor(db, userId, c, [workId], today);
+    if (!book) continue;
+    if (book.finished && c.kind === "books") notes.push({ kind: "counts", challengeId: c.id, title: c.title });
+    if (book.finished && c.kind === "shelf" && book.facts.ownedSince !== null && book.facts.ownedSince < startMs(c.startsOn)) {
       notes.push({ kind: "counts", challengeId: c.id, title: c.title });
     }
     if (c.kind === "bingo" && c.card) {
       const squares = await squaresFor(db, c.id, [userId]);
       const placed = squares.find((s) => s.workId === workId);
       const taken = new Set(squares.map((s) => s.square));
-      const fits = fittingSquares(c.card, facts.facts).filter((i) => !taken.has(i));
+      const fits = fittingSquares(c.card, book.facts).filter((i) => !taken.has(i));
+      // An unread book with no square to suggest and nothing placed isn't worth a mention.
+      if (!book.finished && !placed && fits.length === 0) continue;
       notes.push({
         kind: "bingo",
         challengeId: c.id,
         title: c.title,
+        finished: book.finished,
         squares: fits.map((i) => ({ square: i, label: category(c.card![i]!)?.label ?? "" })),
         placedOn: placed ? (category(c.card[placed.square]!)?.label ?? null) : null,
       });
@@ -415,7 +475,7 @@ export async function ensureFeaturedChallenges(db: DbLike, today: string = today
       { featuredSlug: `books-${y}`, kind: "books" as const, title: `Read 24 books in ${y}`, target: 24, card: null, theme: null },
       { featuredSlug: `shelf-${y}`, kind: "shelf" as const, title: `Read your shelf: 12 in ${y}`, target: 12, card: null, theme: null },
       // The same card every boot: seeded by year, so it never reshuffles under people.
-      { featuredSlug: `bingo-${y}`, kind: "bingo" as const, title: `${y} Book Bingo`, target: null, card: randomCard("classic" as ThemeId, seededRng(y)), theme: "classic" },
+      { featuredSlug: `bingo-${y}`, kind: "bingo" as const, title: `${y} Book Bingo`, target: null, card: randomCard("classic" as ThemeId, 5, seededRng(y)), theme: "classic" },
     ];
     for (const f of wanted) {
       await db
