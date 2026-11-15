@@ -1,8 +1,8 @@
-import type { BookRecord, Binding, CatalogueSource } from "@/domain/catalogue";
+import type { BookRecord, Binding, CatalogueSource, EditionRecord } from "@/domain/catalogue";
 import { parseIsbn, type Isbn13 } from "@/domain/isbn";
+import { jsonClient, type Sleep } from "./http";
 
 const BASE = "https://openlibrary.org";
-const TIMEOUT_MS = 8000;
 // The editions.* fields make Open Library return the edition that best matches the query.
 const SEARCH_FIELDS =
   "key,title,subtitle,author_name,first_publish_year,cover_i,cover_edition_key,subject,isbn,editions,editions.key,editions.title,editions.isbn,editions.cover_i,editions.language";
@@ -24,6 +24,8 @@ type EditionDoc = { key?: string; title?: string; isbn?: string[]; cover_i?: num
 
 type EditionJson = {
   title?: string;
+  isbn_13?: string[];
+  isbn_10?: string[];
   publishers?: string[];
   publish_date?: string;
   number_of_pages?: number;
@@ -89,20 +91,88 @@ function fromDoc(doc: SearchDoc): BookRecord | null {
   };
 }
 
-export class OpenLibrarySource implements CatalogueSource {
-  constructor(
-    private readonly fetchImpl: typeof fetch = fetch,
-    private readonly userAgent = process.env.OPEN_LIBRARY_USER_AGENT ?? "Readmoth/0.1 (https://github.com/erichprivat/shelfsnap)",
-  ) {}
+type WorkJson = { description?: string | { value?: string }; covers?: number[]; subjects?: string[] };
 
-  private async get<T>(path: string): Promise<T | null> {
-    const res = await this.fetchImpl(`${BASE}${path}`, {
-      headers: { "User-Agent": this.userAgent, Accept: "application/json" },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-    if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`Open Library responded ${res.status}`);
-    return (await res.json()) as T;
+export type WorkDetails = { description: string | null; coverUrl: string | null; subjects: string[] };
+
+/**
+ * Open Library descriptions are community-edited markdown: drops reference-style
+ * source links, "Also contained in" lists and link syntax, keeping the prose.
+ */
+export function cleanDescription(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  let text = raw.replace(/\r\n?/g, "\n");
+  text = text.split(/\n-{3,}\s*\n/)[0]!; // everything after a horizontal rule is "Also contained in" etc.
+  text = text
+    .replace(/^\s*\[\d+\]:\s*\S+.*$/gm, "") // [1]: https://…
+    .replace(/\(\s*\[(?:source|Source)\]\s*\[\d+\]\s*\)/g, "") // ([source][1])
+    .replace(/\[([^\]]+)\]\[\d+\]/g, "$1") // [text][1]
+    .replace(/\[([^\]]+)\]\((?:[^)]+)\)/g, "$1") // [text](url)
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return text.length >= 20 ? text : null;
+}
+
+/** Work records mix in machine tags ("award:man_booker_prize=1989", "nyt:…"); keep the words people read. */
+const readableSubjects = (subjects: string[] | undefined) => (subjects ?? []).filter((s) => !/[:=]/.test(s)).slice(0, 12);
+
+const firstCover = (covers: number[] | undefined) => {
+  const id = covers?.find((c) => c > 0);
+  return id ? coverById(id) : null;
+};
+
+function editionFromJson(edition: EditionJson): EditionRecord {
+  return {
+    isbn13: firstIsbn([...(edition.isbn_13 ?? []), ...(edition.isbn_10 ?? [])]),
+    title: edition.title ?? null,
+    publisher: edition.publishers?.[0] ?? null,
+    publishYear: yearOf(edition.publish_date),
+    pageCount: edition.number_of_pages ?? null,
+    binding: bindingOf(edition.physical_format),
+    language: edition.languages?.[0]?.key.split("/").at(-1) ?? null,
+    coverUrl: firstCover(edition.covers),
+    openLibraryKey: edition.key ?? null,
+  };
+}
+
+/** Accepts "/works/OL1W" or "OL1W"; anything else is not an Open Library key we'd fetch. */
+const keyPath = (key: string, kind: "works" | "books") => {
+  const id = key.split("/").at(-1) ?? "";
+  return /^OL\d+[WM]$/.test(id) ? `/${kind}/${id}.json` : null;
+};
+
+export class OpenLibrarySource implements CatalogueSource {
+  private readonly getJson: <T>(url: string) => Promise<T | null>;
+
+  constructor(
+    fetchImpl: typeof fetch = fetch,
+    userAgent = process.env.OPEN_LIBRARY_USER_AGENT ?? "Readmoth/0.1 (https://github.com/erichprivat/shelfsnap)",
+    opts: { sleep?: Sleep; backoffMs?: number[] } = {},
+  ) {
+    this.getJson = jsonClient("Open Library", { fetchImpl, headers: { "User-Agent": userAgent }, ...opts });
+  }
+
+  private get<T>(path: string): Promise<T | null> {
+    return this.getJson<T>(`${BASE}${path}`);
+  }
+
+  /** Description and cover from the work record, which search results don't carry. */
+  async workDetails(workKey: string): Promise<WorkDetails | null> {
+    const path = keyPath(workKey, "works");
+    if (!path) return null;
+    const work = await this.get<WorkJson>(path);
+    if (!work) return null;
+    const raw = typeof work.description === "string" ? work.description : work.description?.value;
+    return { description: cleanDescription(raw), coverUrl: firstCover(work.covers), subjects: readableSubjects(work.subjects) };
+  }
+
+  /** Pages, publisher and binding for an edition found by search. */
+  async editionDetails(editionKey: string): Promise<EditionRecord | null> {
+    const path = keyPath(editionKey, "books");
+    if (!path) return null;
+    const edition = await this.get<EditionJson>(path);
+    return edition ? editionFromJson(edition) : null;
   }
 
   private async searchDocs(params: Record<string, string>, limit: number): Promise<BookRecord[]> {
@@ -138,17 +208,7 @@ export class OpenLibrarySource implements CatalogueSource {
       firstPublishYear: doc?.first_publish_year ?? null,
       subjects: (doc?.subject ?? []).slice(0, 12),
       openLibraryKey: doc?.key ?? null,
-      edition: {
-        isbn13: isbn,
-        title: edition?.title ?? title,
-        publisher: edition?.publishers?.[0] ?? null,
-        publishYear: yearOf(edition?.publish_date),
-        pageCount: edition?.number_of_pages ?? null,
-        binding: bindingOf(edition?.physical_format),
-        language: edition?.languages?.[0]?.key.split("/").at(-1) ?? null,
-        coverUrl: edition?.covers?.find((c) => c > 0) ? coverById(edition.covers.find((c) => c > 0)!) : null,
-        openLibraryKey: edition?.key ?? null,
-      },
+      edition: { ...(edition ? editionFromJson(edition) : {}), isbn13: isbn, title: edition?.title ?? title },
     };
   }
 }

@@ -95,6 +95,9 @@ export function classify(scored: { score: number }[], ownsTop: boolean): SpineSt
 
 type RemoteHit = { rec: BookRecord; score: number };
 
+/** Thrown inside matching when the catalogue is down, so the rest of the shelf doesn't wait on it too. */
+class CatalogueUnreachable extends Error {}
+
 /**
  * Asks the catalogue in up to three ways, stopping once a hit is confident:
  * free text, then title + author fields, then title alone. Free text misses
@@ -112,9 +115,10 @@ async function remoteCandidates(catalogue: CatalogueSource, spine: DetectedSpine
     let recs: BookRecord[];
     try {
       recs = await attempt();
-    } catch {
-      // Catalogue outages degrade to "unmatched"; the user can search by hand.
-      break;
+    } catch (e) {
+      // The source already retried; report the outage instead of passing it off as "no match".
+      console.error("Catalogue lookup failed", e);
+      throw new CatalogueUnreachable();
     }
     for (const rec of recs) {
       const score = scoreCandidate(spine, { ...rec, editionTitles: rec.edition?.title ? [rec.edition.title] : [] });
@@ -148,13 +152,26 @@ async function localCandidates(db: Db, spine: DetectedSpine): Promise<Scored[]> 
   });
 }
 
-async function candidatesFor(db: Db, catalogue: CatalogueSource, spines: DetectedSpine[]): Promise<Scored[][]> {
-  // Reads and network calls run in parallel; catalogue writes stay sequential so dedupe can't race.
-  const gathered = await mapLimit(spines, 4, async (spine) => {
+/** `unreachable`: the catalogue was down, so some spines were only matched against books already stored. */
+async function candidatesFor(
+  db: Db,
+  catalogue: CatalogueSource,
+  spines: DetectedSpine[],
+): Promise<{ results: Scored[][]; unreachable: boolean }> {
+  let unreachable = false;
+  // Reads and network calls run two at a time (Open Library throttles bursts);
+  // catalogue writes stay sequential so dedupe can't race.
+  const gathered = await mapLimit(spines, 2, async (spine) => {
     if (tokens(spine.title ?? spine.text).length === 0) return { local: [], remote: [] };
     const local = await localCandidates(db, spine);
-    const confidentLocally = local.some((c) => c.score >= CONFIDENT);
-    return { local, remote: confidentLocally ? [] : await remoteCandidates(catalogue, spine) };
+    if (unreachable || local.some((c) => c.score >= CONFIDENT)) return { local, remote: [] };
+    try {
+      return { local, remote: await remoteCandidates(catalogue, spine) };
+    } catch (e) {
+      if (!(e instanceof CatalogueUnreachable)) throw e;
+      unreachable = true;
+      return { local, remote: [] };
+    }
   });
   const results: Scored[][] = [];
   for (const [i, { local, remote }] of gathered.entries()) {
@@ -171,7 +188,7 @@ async function candidatesFor(db: Db, catalogue: CatalogueSource, spines: Detecte
     }
     results.push([...byBook.values()].sort((a, b) => b.score - a.score).slice(0, CANDIDATES_PER_SPINE));
   }
-  return results;
+  return { results, unreachable };
 }
 
 async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -251,7 +268,7 @@ export async function processSnap(
   }
 
   const usable = detected.filter((d) => normalizeText(d.text).length > 0 || d.title);
-  const candidates = await candidatesFor(db, catalogue, usable);
+  const { results: candidates, unreachable } = await candidatesFor(db, catalogue, usable);
   const results = usable.map((spine, i) => ({ spine, scored: candidates[i]! }));
   const owned = await ownedWorkIds(db, userId, results.flatMap((r) => r.scored.slice(0, 1).map((s) => s.workId)));
 
@@ -264,15 +281,59 @@ export async function processSnap(
         sessionId,
         ordinal,
         rawText: spine.text || [spine.title, spine.author].filter(Boolean).join(" "),
+        title: spine.title,
+        author: spine.author,
         box: spine.box,
         state,
         candidates,
         chosenEditionId: state === "matched" || state === "duplicate" ? scored[0]!.editionId : null,
       });
     }
-    await tx.update(snapSessions).set({ status: "ready", error: null }).where(eq(snapSessions.id, sessionId));
+    await tx.update(snapSessions).set({ status: "ready", error: null, catalogueError: unreachable }).where(eq(snapSessions.id, sessionId));
   });
   return getOwnedSession(db, userId, sessionId);
+}
+
+/** Spines the reader hasn't decided on yet; confirmed and rejected ones are left alone. */
+const OPEN_STATES: SpineState[] = ["matched", "ambiguous", "unmatched", "duplicate"];
+
+/**
+ * Looks the stored spine text up in the catalogue again, without reading the photo:
+ * free, and possible after the photo is deleted. For when the catalogue was down, or has learnt a book since.
+ * Returns how many spines now have a confident match.
+ */
+export async function rematchSnap(db: Db, catalogue: CatalogueSource, userId: string, sessionId: string) {
+  const session = await getOwnedSession(db, userId, sessionId);
+  if (session.status === "committed") throw conflict("This shelf has already been added to your library");
+  if (session.status !== "ready") throw invalid("This photo hasn't been read yet");
+
+  const open = await db.query.snapSpines.findMany({
+    where: and(eq(snapSpines.sessionId, sessionId), inArray(snapSpines.state, OPEN_STATES)),
+    orderBy: [asc(snapSpines.ordinal)],
+  });
+  const rows = open.filter((s) => normalizeText(s.rawText).length > 0 || s.title);
+  const spines: DetectedSpine[] = rows.map((s) => ({ text: s.rawText, title: s.title, author: s.author, box: s.box }));
+  const { results, unreachable } = await candidatesFor(db, catalogue, spines);
+  const owned = await ownedWorkIds(db, userId, results.flatMap((scored) => scored.slice(0, 1).map((s) => s.workId)));
+
+  let matched = 0;
+  await db.transaction(async (tx) => {
+    for (const [i, row] of rows.entries()) {
+      const scored = results[i]!;
+      const state = classify(scored, scored[0] ? owned.has(scored[0].workId) : false);
+      if (state === "matched") matched++;
+      await tx
+        .update(snapSpines)
+        .set({
+          state,
+          candidates: scored.map((s) => ({ editionId: s.editionId, score: Math.round(s.score * 100) / 100 })),
+          chosenEditionId: state === "matched" || state === "duplicate" ? scored[0]!.editionId : null,
+        })
+        .where(eq(snapSpines.id, row.id));
+    }
+    await tx.update(snapSessions).set({ catalogueError: unreachable }).where(eq(snapSessions.id, sessionId));
+  });
+  return { matched, unreachable };
 }
 
 async function getOwnedSpine(db: DbLike, userId: string, spineId: string) {

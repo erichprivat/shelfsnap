@@ -8,6 +8,7 @@ import {
   confirmSpineAction,
   correctSpineAction,
   rejectSpineAction,
+  rematchSnapAction,
   retrySnapAction,
 } from "@/app/actions/snap";
 import { BookLine, type BookSummary } from "@/components/book-line";
@@ -43,6 +44,7 @@ export function Review({
   error,
   place,
   hasPhoto,
+  catalogueError,
   spines,
 }: {
   sessionId: string;
@@ -50,6 +52,7 @@ export function Review({
   error: string | null;
   place: string | null;
   hasPhoto: boolean;
+  catalogueError: boolean;
   spines: ReviewSpine[];
 }) {
   const { pending, error: actionError, go } = useAction();
@@ -98,6 +101,9 @@ export function Review({
           <p className="text-[15px] text-ink-2">
             {plural(skipped, "book was", "books were")} already added from another photo, so {skipped === 1 ? "it wasn't" : "they weren't"} added twice.
           </p>
+        )}
+        {!committed && spines.length > 0 && (catalogueError || (counts.unmatched ?? 0) + (counts.ambiguous ?? 0) > 0) && (
+          <MatchAgain sessionId={sessionId} catalogueError={catalogueError} />
         )}
         {spines.length === 0 && <p className="text-[15px] text-ink-2">Try a closer, straighter photo with the spines filling the frame — or add the books by hand.</p>}
       </header>
@@ -310,6 +316,46 @@ function MissedBook({ sessionId, spines }: { sessionId: string; spines: ReviewSp
         onPick={(book) => go(() => addMissedBookAction(sessionId, book, after === "start" ? null : Number(after)), () => setOpen(false))}
         onCancel={() => setOpen(false)}
       />
+      <ErrorText>{error}</ErrorText>
+    </div>
+  );
+}
+
+/** Looks the spines up again from their stored text. No photo read, so it's free and works after the photo is gone. */
+function MatchAgain({ sessionId, catalogueError }: { sessionId: string; catalogueError: boolean }) {
+  const { pending, error, go } = useAction();
+  const [result, setResult] = useState<string | null>(null);
+  const run = () =>
+    go(async () => {
+      setResult(null);
+      const res = await rematchSnapAction(sessionId);
+      if (res.ok) {
+        const { matched, unreachable } = res.data;
+        setResult(unreachable ? "Still can't reach the catalogue. Try again in a few minutes." : matched > 0 ? `${plural(matched, "more book")} recognised.` : "No new matches. Search for the rest by hand.");
+      }
+      return res;
+    });
+
+  if (catalogueError) {
+    return (
+      <div className="mt-3 flex flex-col items-start gap-3 border-l-2 border-ochre py-1 pl-4">
+        <p className="text-[15px] text-ink-2">
+          <span className="font-medium text-ink">Couldn&apos;t reach the book catalogue.</span> The spines were read fine, but we couldn&apos;t look them up. Matching again is free.
+        </p>
+        <Button variant="line" disabled={pending} onClick={run}>
+          {pending ? "Matching…" : "Match again"}
+        </Button>
+        {result && <p className="text-sm text-ink-2">{result}</p>}
+        <ErrorText>{error}</ErrorText>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-ink-3">
+      <button type="button" disabled={pending} onClick={run} className="underline decoration-rule-strong underline-offset-4 hover:text-ink disabled:opacity-50">
+        {pending ? "Matching…" : "Match again"}
+      </button>
+      <span>{result ?? "Looks the unrecognised spines up again, free."}</span>
       <ErrorText>{error}</ErrorText>
     </div>
   );

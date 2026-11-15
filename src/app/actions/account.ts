@@ -3,6 +3,7 @@
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { db } from "@/db";
 import { user as userTable } from "@/db/schema";
 import { deleteAccount } from "@/domain/account";
@@ -13,6 +14,7 @@ import { DomainError, invalid } from "@/domain/errors";
 import { run } from "@/server/action";
 import { auth, canSignUp, requireUser } from "@/server/auth";
 import { sendFeedbackEmail } from "@/server/email";
+import { enrichLibraryBooks } from "@/server/services";
 import { deleteUploads } from "@/server/services";
 import { headers } from "next/headers";
 import { GENRES } from "@/lib/genres";
@@ -47,6 +49,7 @@ export async function importAction(_: unknown, form: FormData) {
     if (file.size > MAX_IMPORT_BYTES) throw invalid("That file is too large (15 MB max)");
     const report = await applyImport(db, user.id, parseImportCsv(await file.text()));
     revalidatePath("/library");
+    after(enrichLibraryBooks);
     return report;
   });
 }

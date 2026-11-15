@@ -66,6 +66,18 @@ bun run stats
 - **Not a shelf:** the read also answers whether the photo shows books; if not, the snap fails and the photo is dropped.
 - **Photos** are deleted once a snap is added to the library, and after seven days if it never is (swept on boot and daily).
 
+## Book details
+
+Search and shelf snaps match against Open Library. Descriptions, covers and page counts are then filled in the
+background (`src/domain/enrich.ts`): Open Library's work and edition records first, finding the record by title and
+author for books typed in or imported, then Google Books for what is still missing. Only gaps are filled. It runs after
+adding books, when a book page is opened, and as a sweep on boot and daily. Google Books needs `GOOGLE_BOOKS_API_KEY`
+(free; Books API in Google Cloud) to be useful. Without one it falls back to a shared anonymous quota that is usually
+exhausted.
+
+If Open Library can't be reached while a snap is matched, the review page says so and offers **Match again**, which
+re-runs matching on the stored spine text: no new photo read, so it's free and works after the photo is deleted.
+
 ## Deploy (Fly.io)
 
 One machine in Stockholm with a 3 GB volume at `/data` holding the SQLite database and snap photos awaiting review
@@ -95,7 +107,7 @@ bun run lint
 | Path | What's there |
 | --- | --- |
 | `src/domain/` | All business rules, framework-free and tested. Ownership (copies) and reading (status + read-throughs) are separate axes. |
-| `src/sources/` | Open Library catalogue client and the Claude spine reader. |
+| `src/sources/` | Open Library and Google Books clients, and the Claude spine reader. |
 | `src/app/actions/` | Server actions: auth check, call the domain, revalidate. |
 | `src/app/(app)/` | Signed-in screens. `src/components/` holds the spine, cover and bookplate primitives. |
 | `src/db/` | Drizzle schema (SQLite/libSQL), migrations in `drizzle/`, dev seed. |

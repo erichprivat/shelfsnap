@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { db } from "@/db";
 import { invalid } from "@/domain/errors";
 import {
@@ -16,12 +17,13 @@ import {
   PHOTO_GONE,
   processSnap,
   rejectSpine,
+  rematchSnap,
   validateSnapUpload,
 } from "@/domain/snap";
 import { assertCanSnap, assertDailyBudget, dailyBudgetFromEnv, snapLimitFromEnv } from "@/domain/usage";
 import { run } from "@/server/action";
 import { isAdmin, requireUser } from "@/server/auth";
-import { catalogueSource, discardUploads, readUpload, saveUpload, snapsAreMetered, spineReader } from "@/server/services";
+import { catalogueSource, discardUploads, enrichLibraryBooks, readUpload, saveUpload, snapsAreMetered, spineReader } from "@/server/services";
 import { prepareImage } from "@/sources/spine-reader";
 
 /** Every model read checks the reader's monthly snaps (admins have none) and the day's budget across all readers. */
@@ -69,6 +71,16 @@ export async function retrySnapAction(sessionId: string) {
   });
 }
 
+/** Free: no photo read, so no snap limit or budget check. */
+export async function rematchSnapAction(sessionId: string) {
+  const user = await requireUser();
+  return run(async () => {
+    const result = await rematchSnap(db, catalogueSource, user.id, sessionId);
+    revalidatePath(`/snap/${sessionId}`);
+    return result;
+  });
+}
+
 export async function confirmSpineAction(sessionId: string, spineId: string, editionId?: string) {
   const user = await requireUser();
   return run(async () => {
@@ -101,6 +113,7 @@ export async function commitSnapAction(sessionId: string) {
     if (photo) await discardUploads([photo]);
     revalidatePath(`/snap/${sessionId}`);
     revalidatePath("/library");
+    if (added > 0) after(enrichLibraryBooks);
     return { added, skipped };
   });
 }

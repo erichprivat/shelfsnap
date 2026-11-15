@@ -42,7 +42,7 @@ export default async function SnapReviewPage({ params }: PageProps<"/snap/[id]">
       <Link href="/snap" className="text-sm text-ink-3 hover:text-ink">
         ← Snap another shelf
       </Link>
-      <Review sessionId={session.id} status={session.status} error={session.error} place={place} hasPhoto={!session.photoDeletedAt} spines={view} />
+      <Review sessionId={session.id} status={session.status} error={session.error} place={place} hasPhoto={!session.photoDeletedAt} catalogueError={session.catalogueError} spines={view} />
     </div>
   );
 }

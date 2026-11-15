@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { db } from "@/db";
 import { readingStatuses, type CopyFormat, type ReadingStatus } from "@/db/schema";
 import { createManualBook, resolveIsbn, searchLocal, upsertBook } from "@/domain/catalogue";
@@ -9,7 +10,7 @@ import { invalid } from "@/domain/errors";
 import { clearStatus, deleteReadThrough, setStatus, startReread, updateReadThrough } from "@/domain/reading";
 import { run } from "@/server/action";
 import { requireUser } from "@/server/auth";
-import { catalogueSource } from "@/server/services";
+import { catalogueSource, enrichBook } from "@/server/services";
 
 const touched = (workId?: string) => {
   revalidatePath("/library");
@@ -73,6 +74,7 @@ export async function addCopyAction(
   return run(async () => {
     const copy = await addCopy(db, user.id, input);
     touched(workId);
+    after(() => enrichBook(workId));
     return copy.id;
   });
 }
@@ -182,6 +184,7 @@ export async function addManualBookAction(input: { title: string; author?: strin
     if (intent === "own") await addCopy(db, user.id, { editionId });
     else await setStatus(db, user.id, workId, "want_to_read");
     touched(workId);
+    after(() => enrichBook(workId));
     return workId;
   });
 }

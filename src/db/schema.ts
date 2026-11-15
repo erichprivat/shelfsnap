@@ -104,6 +104,10 @@ export const works = sqliteTable(
     openLibraryKey: text("open_library_key").unique(),
     // Lowercased, diacritic-free "title|first author" used to dedupe works without a source key.
     matchKey: text("match_key").notNull(),
+    description: text("description"),
+    descriptionSource: text("description_source", { enum: ["openlibrary", "googlebooks"] }),
+    // Last time details were fetched from the catalogues, found or not.
+    enrichedAt: integer("enriched_at", { mode: "timestamp_ms" }),
     createdAt: createdAt(),
   },
   (t) => [index("works_match_key_idx").on(t.matchKey)],
@@ -264,6 +268,8 @@ export const snapSessions = sqliteTable(
     error: text("error"),
     // Photos are only kept while there is something left to review; the file is gone once this is set.
     photoDeletedAt: integer("photo_deleted_at", { mode: "timestamp_ms" }),
+    // The book catalogue couldn't be reached while matching, so "unmatched" means "not looked up".
+    catalogueError: integer("catalogue_error", { mode: "boolean" }).notNull().default(false),
     createdAt: createdAt(),
   },
   (t) => [index("snap_sessions_user_idx").on(t.userId)],
@@ -282,6 +288,9 @@ export const snapSpines = sqliteTable(
     // Left-to-right order on the shelf.
     ordinal: integer("ordinal").notNull(),
     rawText: text("raw_text").notNull(),
+    // What the reader made of the spine, kept so matching can run again without the photo.
+    title: text("title"),
+    author: text("author"),
     box: text("box", { mode: "json" }).$type<BoundingBox | null>(),
     state: text("state", {
       enum: ["matched", "ambiguous", "unmatched", "duplicate", "confirmed", "rejected"],

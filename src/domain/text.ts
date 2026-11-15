@@ -69,3 +69,15 @@ export function editDistance(a: string, b: string): number {
   }
   return prev[b.length]!;
 }
+
+/**
+ * Whether a catalogue record is the book we asked for: our title nearly all there, the record's own title
+ * mostly ours ("Study Guide to …" is not the book), and, when we know it, the author present.
+ */
+export function isSameBook(want: { title: string; author?: string | null }, record: { title: string; subtitle?: string | null; authors: string[] }) {
+  const wanted = mainTitle(want.title);
+  if (tokenCoverage([record.title, record.subtitle].filter(Boolean).join(" "), wanted) < 0.8) return false;
+  if (tokenCoverage(wanted, mainTitle(record.title)) < 0.6) return false;
+  if (!want.author) return true;
+  return record.authors.some((a) => tokenCoverage(a, want.author!) >= 0.5 || tokenCoverage(want.author!, a) >= 0.5);
+}
