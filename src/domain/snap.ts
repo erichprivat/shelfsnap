@@ -16,6 +16,8 @@ const ACCEPTED_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/
 export const CONFIDENT = 0.8;
 export const MARGIN = 0.15;
 export const PLAUSIBLE = 0.45;
+/** Author evidence when the spine shows the surname but not the full name. */
+const SURNAME_ONLY = 0.9;
 const CANDIDATES_PER_SPINE = 4;
 /** Photos of snaps nobody finished reviewing are deleted after this long. */
 export const PHOTO_RETENTION_MS = 7 * 24 * 3_600_000;
@@ -77,7 +79,16 @@ function scoreTitle(spine: Pick<DetectedSpine, "text" | "title" | "author">, tit
   // Nothing on the spine besides the title: the author is unknown, not contradicted.
   if (authors.length === 0 || (leftover.length === 0 && !spine.author)) return titleScore * 0.85;
   // Records often list a co-author, editor or translator first; any of them on the spine counts.
-  const authorScore = Math.max(...authors.map((a) => tokenCoverage(observed, a)));
+  // Spines usually print only the surname ("SCHACHNOVELLE ZWEIG"): that's nearly as good as the full name,
+  // as long as it's printed beside the title rather than being a word of it.
+  const besideTitle = leftover.join(" ");
+  const authorScore = Math.max(
+    ...authors.map((a) => {
+      const surname = tokens(a).at(-1);
+      const onSpine = surname && surname.length >= 3 && tokenCoverage(besideTitle, surname) === 1 ? SURNAME_ONLY : 0;
+      return Math.max(tokenCoverage(observed, a), onSpine);
+    }),
+  );
   // A one-word title ("Sult") is weak evidence alone; let the author decide.
   const titleWeight = titleWords.size <= 1 ? 0.55 : 0.75;
   return titleScore * titleWeight + authorScore * (1 - titleWeight);
@@ -289,10 +300,14 @@ export async function processSnap(
         chosenEditionId: state === "matched" || state === "duplicate" ? scored[0]!.editionId : null,
       });
     }
-    await tx.update(snapSessions).set({ status: "ready", error: null, catalogueError: unreachable }).where(eq(snapSessions.id, sessionId));
+    await tx.update(snapSessions).set({ status: "ready", error: null, catalogueError: unreachable, matchedAt: new Date() }).where(eq(snapSessions.id, sessionId));
   });
   return getOwnedSession(db, userId, sessionId);
 }
+
+/** Matching should run again by itself: the catalogue was down, or the snap predates proper matching. */
+export const needsRematch = (session: Pick<Session, "status" | "catalogueError" | "matchedAt">) =>
+  session.status === "ready" && (session.catalogueError || !session.matchedAt);
 
 /** Spines the reader hasn't decided on yet; confirmed and rejected ones are left alone. */
 const OPEN_STATES: SpineState[] = ["matched", "ambiguous", "unmatched", "duplicate"];
@@ -331,7 +346,7 @@ export async function rematchSnap(db: Db, catalogue: CatalogueSource, userId: st
         })
         .where(eq(snapSpines.id, row.id));
     }
-    await tx.update(snapSessions).set({ catalogueError: unreachable }).where(eq(snapSessions.id, sessionId));
+    await tx.update(snapSessions).set({ catalogueError: unreachable, matchedAt: new Date() }).where(eq(snapSessions.id, sessionId));
   });
   return { matched, unreachable };
 }

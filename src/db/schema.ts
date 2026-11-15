@@ -270,6 +270,8 @@ export const snapSessions = sqliteTable(
     photoDeletedAt: integer("photo_deleted_at", { mode: "timestamp_ms" }),
     // The book catalogue couldn't be reached while matching, so "unmatched" means "not looked up".
     catalogueError: integer("catalogue_error", { mode: "boolean" }).notNull().default(false),
+    // When spines were last matched against the catalogue; null for snaps from before this was recorded.
+    matchedAt: integer("matched_at", { mode: "timestamp_ms" }),
     createdAt: createdAt(),
   },
   (t) => [index("snap_sessions_user_idx").on(t.userId)],

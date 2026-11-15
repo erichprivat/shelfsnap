@@ -1,0 +1,1 @@
+ALTER TABLE `snap_sessions` ADD `matched_at` integer;
