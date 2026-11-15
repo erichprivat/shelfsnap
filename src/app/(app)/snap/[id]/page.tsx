@@ -33,6 +33,7 @@ export default async function SnapReviewPage({ params }: PageProps<"/snap/[id]">
     rawText: s.rawText,
     state: s.state,
     box: s.box,
+    catalogueFailed: s.catalogueFailed,
     chosen: s.chosenEditionId ? (byId.get(s.chosenEditionId) ?? null) : null,
     candidates: s.candidates.map((c) => byId.get(c.editionId)).filter((c) => c !== undefined),
   }));

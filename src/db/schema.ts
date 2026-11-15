@@ -282,12 +282,17 @@ export const snapSpines = sqliteTable(
     // Left-to-right order on the shelf.
     ordinal: integer("ordinal").notNull(),
     rawText: text("raw_text").notNull(),
+    // The reader's own split of the spine text, kept so "Match again" searches as well as the first read did.
+    title: text("title"),
+    author: text("author"),
     box: text("box", { mode: "json" }).$type<BoundingBox | null>(),
     state: text("state", {
       enum: ["matched", "ambiguous", "unmatched", "duplicate", "confirmed", "rejected"],
     }).notNull(),
     candidates: text("candidates", { mode: "json" }).$type<SpineCandidate[]>().notNull().default(sql`'[]'`),
     chosenEditionId: text("chosen_edition_id").references(() => editions.id, { onDelete: "set null" }),
+    // The book catalogue couldn't be reached for this spine, so "unmatched" means "not looked up" — worth matching again.
+    catalogueFailed: integer("catalogue_failed", { mode: "boolean" }).notNull().default(false),
   },
   (t) => [uniqueIndex("snap_spines_order_idx").on(t.sessionId, t.ordinal)],
 );
