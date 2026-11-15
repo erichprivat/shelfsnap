@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { after } from "next/server";
 import { cache } from "react";
 import { db } from "@/db";
 import { copies, editions, listItems, lists, works } from "@/db/schema";
@@ -13,7 +14,9 @@ import { FORMAT_LABEL } from "@/lib/labels";
 import { placeOrder, placePaths } from "@/lib/places";
 import { normalizeText } from "@/domain/text";
 import { requireUser } from "@/server/auth";
+import { enrichBook } from "@/server/services";
 import { AddCopy, CopyCard, ListPicker, ReadHistory, StatusControl } from "./controls";
+import { Description } from "./description";
 
 const getWork = cache(async (id: string) => db.query.works.findFirst({ where: eq(works.id, id), with: { editions: true } }));
 
@@ -27,6 +30,8 @@ export default async function BookPage({ params }: PageProps<"/book/[workId]">) 
   const { workId } = await params;
   const work = await getWork(workId);
   if (!work) notFound();
+  // Never looked up (a snap candidate, or added while the catalogues were down): fetch details for next time.
+  if (!work.enrichedAt) after(() => enrichBook(work.id));
 
   const [myCopies, status, reads, places, myLists, memberships] = await Promise.all([
     db
@@ -44,6 +49,7 @@ export default async function BookPage({ params }: PageProps<"/book/[workId]">) 
   const paths = placePaths(places);
   const placeOptions = placeOrder(places).map((p) => ({ id: p.id, label: (paths.get(p.id) ?? []).join(" / ") }));
   const lead = myCopies[0]?.edition ?? work.editions.find((e) => e.coverUrl) ?? work.editions[0];
+  const coverUrl = lead?.coverUrl ?? work.editions.find((e) => e.coverUrl)?.coverUrl ?? null;
   const meta = [
     lead?.title && normalizeText(lead.title) !== normalizeText(work.title) && ["Original title", work.title],
     work.firstPublishYear && ["First published", String(work.firstPublishYear)],
@@ -59,7 +65,7 @@ export default async function BookPage({ params }: PageProps<"/book/[workId]">) 
       </Link>
 
       <header className="grid gap-8 sm:grid-cols-[12rem_1fr] sm:gap-10 lg:grid-cols-[15rem_1fr]">
-        <Cover seed={work.id} title={work.title} authors={work.authors} url={lead?.coverUrl ?? null} size="lg" className="w-40 sm:w-full" />
+        <Cover seed={work.id} title={work.title} authors={work.authors} url={coverUrl} size="lg" className="w-40 sm:w-full" />
         <div className="flex flex-col gap-6">
           <div className="flex flex-col gap-2">
             <h1 className="font-serif text-[2.4rem] leading-[1.02] tracking-[-0.01em] text-balance sm:text-[3.2rem]">{lead?.title || work.title}</h1>
@@ -80,6 +86,7 @@ export default async function BookPage({ params }: PageProps<"/book/[workId]">) 
           {work.subjects.length > 0 && (
             <p className="text-sm text-ink-3">{work.subjects.slice(0, 6).join(" · ")}</p>
           )}
+          {work.description && <Description text={work.description} source={work.descriptionSource} />}
         </div>
       </header>
 

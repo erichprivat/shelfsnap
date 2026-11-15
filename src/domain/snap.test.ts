@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { copies, snapSessions, snapSpines } from "@/db/schema";
 import { SpineReaderError, type DetectedSpine, type SpineReader } from "@/sources/spine-reader";
 import { addBook, book, makeUser, testDb, type TestDb } from "@/test/db";
-import { createManualBook, type BookRecord, type CatalogueSource } from "./catalogue";
+import { createManualBook, upsertBook, type BookRecord, type CatalogueSource } from "./catalogue";
 import { addCopy } from "./copies";
 import { createLocation } from "./locations";
 import {
@@ -20,6 +20,7 @@ import {
   PHOTO_RETENTION_MS,
   processSnap,
   rejectSpine,
+  rematchSnap,
   scoreCandidate,
   validateSnapUpload,
 } from "./snap";
@@ -121,6 +122,7 @@ describe("processSnap", () => {
     const { session, rows } = await snap([spine("PIRANESI SUSANNA CLARKE")], [], null, { down: true });
     expect(session.status).toBe("ready");
     expect(rows[0]!.state).toBe("unmatched");
+    expect(session.catalogueError).toBe(true);
   });
 
   it("records reader failures on the session with a friendly message", async () => {
@@ -388,5 +390,61 @@ describe("manual correction and manual add", () => {
     const other = await makeUser(db, "Other");
     await expect(addMissedBook(db, other, session.id, { title: "X" }, null)).rejects.toMatchObject({ code: "not_found" });
     await expect(correctSpine(db, other, rows[0]!.id, { title: "X" })).rejects.toMatchObject({ code: "not_found" });
+  });
+});
+
+describe("matching again", () => {
+  const mothwing = book("The Mothwing Atlas", "Ada Quill");
+  const lantern = book("Lantern Harbour", "Bo Ferren");
+  const spines = () => [spine("THE MOTHWING ATLAS QUILL", "The Mothwing Atlas", "Ada Quill"), spine("LANTERN HARBOUR FERREN", "Lantern Harbour", "Bo Ferren")];
+  const rowsOf = (sessionId: string) => db.query.snapSpines.findMany({ where: eq(snapSpines.sessionId, sessionId), orderBy: [asc(snapSpines.ordinal)] });
+
+  it("doesn't flag an outage when local books were enough", async () => {
+    await upsertBook(db, mothwing);
+    const { session, rows } = await snap([spines()[0]!], [], null, { down: true });
+    expect(rows[0]!.state).toBe("matched");
+    expect(session.catalogueError).toBe(false);
+  });
+
+  it("keeps what the reader made of each spine", async () => {
+    const { rows } = await snap([spines()[0]!], [mothwing]);
+    expect(rows[0]).toMatchObject({ title: "The Mothwing Atlas", author: "Ada Quill" });
+  });
+
+  it("matches spines from their stored text once the catalogue is back, without the photo", async () => {
+    const { session } = await snap(spines(), [], null, { down: true });
+    await db.update(snapSessions).set({ photoDeletedAt: new Date() }).where(eq(snapSessions.id, session.id));
+    expect(await rematchSnap(db, catalogue([mothwing, lantern]), me, session.id)).toEqual({ matched: 2, unreachable: false });
+    const rows = await rowsOf(session.id);
+    expect(rows.map((r) => r.state)).toEqual(["matched", "matched"]);
+    expect(rows.every((r) => r.chosenEditionId)).toBe(true);
+    expect((await db.query.snapSessions.findFirst({ where: eq(snapSessions.id, session.id) }))!.catalogueError).toBe(false);
+  });
+
+  it("leaves spines the reader already decided on alone", async () => {
+    const { session, rows } = await snap(spines(), [], null, { down: true });
+    const manual = await createManualBook(db, { title: "The Mothwing Atlas (signed)", author: "Ada Quill" });
+    await confirmSpine(db, me, rows[0]!.id, manual.editionId);
+    await rejectSpine(db, me, rows[1]!.id);
+    expect(await rematchSnap(db, catalogue([mothwing, lantern]), me, session.id)).toEqual({ matched: 0, unreachable: false });
+    expect((await rowsOf(session.id)).map((r) => [r.state, r.chosenEditionId])).toEqual([["confirmed", manual.editionId], ["rejected", null]]);
+  });
+
+  it("falls back to the raw text for spines read before titles were kept", async () => {
+    const { session, rows } = await snap([spines()[0]!], [], null, { down: true });
+    await db.update(snapSpines).set({ title: null, author: null }).where(eq(snapSpines.id, rows[0]!.id));
+    expect((await rematchSnap(db, catalogue([mothwing]), me, session.id)).matched).toBe(1);
+  });
+
+  it("says so when the catalogue is still down", async () => {
+    const { session } = await snap([spines()[0]!], [], null, { down: true });
+    expect(await rematchSnap(db, catalogue([], { down: true }), me, session.id)).toEqual({ matched: 0, unreachable: true });
+  });
+
+  it("refuses once the shelf is in the library", async () => {
+    const { session } = await snap([spines()[0]!], [mothwing]);
+    await confirmAllMatched(db, me, session.id);
+    await commitSnap(db, me, session.id);
+    await expect(rematchSnap(db, catalogue([mothwing]), me, session.id)).rejects.toThrow(/already/);
   });
 });

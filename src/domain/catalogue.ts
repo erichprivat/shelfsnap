@@ -154,7 +154,7 @@ export async function upsertBook(db: Db, rec: BookRecord): Promise<CatalogueEntr
   return { workId, editionId: row!.id };
 }
 
-async function fillEditionGaps(db: Db, existing: typeof editions.$inferSelect, ed: EditionRecord) {
+export async function fillEditionGaps(db: Db, existing: typeof editions.$inferSelect, ed: EditionRecord) {
   const patch: Partial<typeof editions.$inferInsert> = {};
   if (!existing.isbn13 && ed.isbn13) patch.isbn13 = ed.isbn13;
   if (!existing.coverUrl && clean(ed.coverUrl)) patch.coverUrl = clean(ed.coverUrl);

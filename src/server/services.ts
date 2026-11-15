@@ -1,11 +1,14 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { db } from "@/db";
+import { enrichPending, enrichWork, type EnrichSources } from "@/domain/enrich";
 import { expireSnapPhotos } from "@/domain/snap";
+import { GoogleBooksSource } from "@/sources/googlebooks";
 import { OpenLibrarySource } from "@/sources/openlibrary";
 import { defaultSpineReader } from "@/sources/spine-reader";
 
 export const catalogueSource = new OpenLibrarySource();
+const enrichSources: EnrichSources = { openLibrary: catalogueSource, googleBooks: new GoogleBooksSource() };
 export const spineReader = defaultSpineReader();
 /** Only real model reads cost money, so only they count against the monthly snap limit. */
 export const snapsAreMetered = spineReader.name === "claude";
@@ -45,4 +48,24 @@ export async function deleteUploads(userId: string) {
   const dir = path.resolve(UPLOAD_ROOT, userId);
   if (!dir.startsWith(UPLOAD_ROOT + path.sep) || dir === UPLOAD_ROOT) throw new Error("Invalid upload path");
   await rm(dir, { recursive: true, force: true });
+}
+
+let enriching: Promise<number> | null = null;
+
+/** Fetches details for owned books that lack them. One run at a time; a call during a run joins it. */
+export function enrichLibraryBooks() {
+  enriching ??= enrichPending(db, enrichSources)
+    .catch((e) => {
+      console.error("Book details sweep failed", e);
+      return 0;
+    })
+    .finally(() => {
+      enriching = null;
+    });
+  return enriching;
+}
+
+/** Details for one book, e.g. when its page is opened before the sweep got to it. */
+export async function enrichBook(workId: string) {
+  await enrichWork(db, enrichSources, workId).catch((e) => console.error("Book details lookup failed", e));
 }

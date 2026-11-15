@@ -27,7 +27,7 @@ export default function PrivacyPage() {
       </header>
       <main className="mx-auto max-w-4xl px-4 pt-8 pb-20 sm:px-8">
         <div className="flex flex-col gap-3 pb-10">
-          <span className="label">Privacy · updated 8 November 2026</span>
+          <span className="label">Privacy · updated 15 November 2026</span>
           <h1 className="font-serif text-[2.6rem] leading-[1.02] tracking-[-0.01em] text-balance sm:text-[3.2rem]">
             What Readmoth keeps, and why.
           </h1>
@@ -68,6 +68,10 @@ export default function PrivacyPage() {
           <p>
             <strong>Open Library</strong> (the Internet Archive) is the book catalogue. Readmoth&apos;s server looks titles and ISBNs up
             there without saying who&apos;s asking; book covers load straight from Open Library, so your browser does connect to it.
+          </p>
+          <p>
+            <strong>Google Books</strong> fills in descriptions, covers and page counts Open Library doesn&apos;t have. The same applies:
+            the server sends only titles, authors and ISBNs, never photos or anything about you; covers from Google load in your browser.
           </p>
           <p>Lists you choose to share can be read by anyone with the link, until you stop sharing them.</p>
         </Part>
