@@ -6,7 +6,7 @@ import { db } from "@/db";
 import { editions, snapSpines } from "@/db/schema";
 import { DomainError } from "@/domain/errors";
 import { locationPath } from "@/domain/locations";
-import { getOwnedSession, markNewDuplicates } from "@/domain/snap";
+import { getOwnedSession, markNewDuplicates, needsRematch } from "@/domain/snap";
 import { requireUser } from "@/server/auth";
 import { Review, type ReviewSpine } from "./review";
 
@@ -42,7 +42,7 @@ export default async function SnapReviewPage({ params }: PageProps<"/snap/[id]">
       <Link href="/snap" className="text-sm text-ink-3 hover:text-ink">
         ← Snap another shelf
       </Link>
-      <Review sessionId={session.id} status={session.status} error={session.error} place={place} hasPhoto={!session.photoDeletedAt} catalogueError={session.catalogueError} spines={view} />
+      <Review sessionId={session.id} status={session.status} error={session.error} place={place} hasPhoto={!session.photoDeletedAt} catalogueError={session.catalogueError} autoMatch={needsRematch(session) && view.some((s) => s.state === "unmatched" || s.state === "ambiguous")} spines={view} />
     </div>
   );
 }

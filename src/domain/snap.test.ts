@@ -16,6 +16,7 @@ import {
   createSnapSession,
   expireSnapPhotos,
   markNewDuplicates,
+  needsRematch,
   NOT_A_SHELF,
   PHOTO_RETENTION_MS,
   processSnap,
@@ -446,5 +447,44 @@ describe("matching again", () => {
     await confirmAllMatched(db, me, session.id);
     await commitSnap(db, me, session.id);
     await expect(rematchSnap(db, catalogue([mothwing]), me, session.id)).rejects.toThrow(/already/);
+  });
+});
+
+describe("surname-only spines", () => {
+  const atlas = { title: "Mothwing", authors: ["Ada Quill"] };
+
+  it("counts a surname beside the title as the author", () => {
+    const scored = [scoreCandidate(spine("MOTHWING QUILL"), atlas), scoreCandidate(spine("MOTHWING QUILL"), { title: "Mothwing", authors: ["Someone Else"] })];
+    expect(scored[0]).toBeGreaterThanOrEqual(0.9);
+    expect(classify(scored.map((score) => ({ score })), false)).toBe("matched");
+  });
+
+  it("doesn't count the surname when it's a word of the title", () => {
+    // "Quill" is the title here; the other word on the spine isn't the author's name.
+    expect(scoreCandidate(spine("QUILL MOTHWING"), { title: "Quill", authors: ["Ada Quill"] })).toBeLessThan(0.8);
+  });
+
+  it("matches a snap of surname-only spines without a click", async () => {
+    const { rows } = await snap([spine("MOTHWING QUILL")], [book("Mothwing", "Ada Quill"), book("Mothwing", "Someone Else")]);
+    expect(rows[0]!.state).toBe("matched");
+  });
+});
+
+describe("matching again by itself", () => {
+  it("is needed after an outage or for snaps matched before this was recorded, not otherwise", async () => {
+    const ok = await snap([spine("MOTHWING QUILL")], [book("Mothwing", "Ada Quill")]);
+    expect(ok.session.matchedAt).toBeInstanceOf(Date);
+    expect(needsRematch(ok.session)).toBe(false);
+    const down = await snap([spine("MOTHWING QUILL")], [], null, { down: true });
+    expect(needsRematch(down.session)).toBe(true);
+    expect(needsRematch({ ...ok.session, matchedAt: null })).toBe(true);
+    expect(needsRematch({ ...ok.session, status: "committed", matchedAt: null })).toBe(false);
+  });
+
+  it("isn't needed again once matching ran with the catalogue up", async () => {
+    const { session } = await snap([spine("MOTHWING QUILL")], [], null, { down: true });
+    await db.update(snapSessions).set({ matchedAt: null }).where(eq(snapSessions.id, session.id));
+    await rematchSnap(db, catalogue([book("Mothwing", "Ada Quill")]), me, session.id);
+    expect(needsRematch((await db.query.snapSessions.findFirst({ where: eq(snapSessions.id, session.id) }))!)).toBe(false);
   });
 });

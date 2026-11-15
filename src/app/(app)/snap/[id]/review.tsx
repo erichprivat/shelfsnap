@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   addMissedBookAction,
   commitSnapAction,
@@ -45,6 +45,7 @@ export function Review({
   place,
   hasPhoto,
   catalogueError,
+  autoMatch = false,
   spines,
 }: {
   sessionId: string;
@@ -53,6 +54,8 @@ export function Review({
   place: string | null;
   hasPhoto: boolean;
   catalogueError: boolean;
+  /** Re-run matching as soon as the page opens, without waiting for a click. */
+  autoMatch?: boolean;
   spines: ReviewSpine[];
 }) {
   const { pending, error: actionError, go } = useAction();
@@ -103,7 +106,7 @@ export function Review({
           </p>
         )}
         {!committed && spines.length > 0 && (catalogueError || (counts.unmatched ?? 0) + (counts.ambiguous ?? 0) > 0) && (
-          <MatchAgain sessionId={sessionId} catalogueError={catalogueError} />
+          <MatchAgain sessionId={sessionId} catalogueError={catalogueError} auto={autoMatch} />
         )}
         {spines.length === 0 && <p className="text-[15px] text-ink-2">Try a closer, straighter photo with the spines filling the frame — or add the books by hand.</p>}
       </header>
@@ -322,9 +325,10 @@ function MissedBook({ sessionId, spines }: { sessionId: string; spines: ReviewSp
 }
 
 /** Looks the spines up again from their stored text. No photo read, so it's free and works after the photo is gone. */
-function MatchAgain({ sessionId, catalogueError }: { sessionId: string; catalogueError: boolean }) {
+function MatchAgain({ sessionId, catalogueError, auto }: { sessionId: string; catalogueError: boolean; auto: boolean }) {
   const { pending, error, go } = useAction();
   const [result, setResult] = useState<string | null>(null);
+  const started = useRef(false);
   const run = () =>
     go(async () => {
       setResult(null);
@@ -335,7 +339,17 @@ function MatchAgain({ sessionId, catalogueError }: { sessionId: string; catalogu
       }
       return res;
     });
+  useEffect(() => {
+    if (!auto || started.current) return;
+    started.current = true;
+    void run();
+    // Once per page view; run is recreated each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auto]);
 
+  if (pending && auto && !result) {
+    return <p className="mt-1 text-sm text-ink-2">Looking these books up in the catalogue…</p>;
+  }
   if (catalogueError) {
     return (
       <div className="mt-3 flex flex-col items-start gap-3 border-l-2 border-ochre py-1 pl-4">
